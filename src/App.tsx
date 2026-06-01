@@ -829,23 +829,40 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
   return (
     <section className="stack">
       <SectionHeader title="30天課程路線圖 / 30-Day Roadmap" desc="Day 1-5 部署落地，Day 6-15 進階 production 化，Day 16-30 深入架構與營運。" />
-      <div className="stage-band">
-        {roadmapSections.map((stage) => {
-          const done = isStageDone(stage);
-          const current = isStageCurrent(stage);
-          return (
-            <div key={stage.key} className={`${current ? "stage-current" : ""}`}>
-              <strong>{stage.title}</strong>
-              <span>{stage.titleEn}</span>
-              <small>{stage.objective}</small>
-              <strong className="stage-range">Day {stage.startDay} - Day {stage.endDay}</strong>
-              <small>{done ? "已完成 / Completed" : current ? "目前進行中" : "尚未開始"}</small>
-            </div>
-          );
-        })}
-      </div>
+      <section className="roadmap-overview" aria-labelledby="roadmap-overview-title">
+        <div className="roadmap-section-title">
+          <span>01</span>
+          <div>
+            <h3 id="roadmap-overview-title">階段總覽 / Learning Stages</h3>
+            <p>先看 30 天被切成哪幾個能力階段。</p>
+          </div>
+        </div>
+        <div className="stage-band">
+          {roadmapSections.map((stage) => {
+            const done = isStageDone(stage);
+            const current = isStageCurrent(stage);
+            return (
+              <div key={stage.key} className={`stage-summary-card ${current ? "stage-current" : ""}`}>
+                <strong>{stage.title}</strong>
+                <span>{stage.titleEn}</span>
+                <small>{stage.objective}</small>
+                <strong className="stage-range">Day {stage.startDay} - Day {stage.endDay}</strong>
+                <small>{done ? "已完成 / Completed" : current ? "目前進行中" : "尚未開始"}</small>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
-      <div className="roadmap-stages">
+      <section className="roadmap-daily" aria-labelledby="roadmap-daily-title">
+        <div className="roadmap-section-title">
+          <span>02</span>
+          <div>
+            <h3 id="roadmap-daily-title">每日進度 / Daily Lessons</h3>
+            <p>每張 Day 卡片都可以進入當天教學與 mentor 引導。</p>
+          </div>
+        </div>
+        <div className="roadmap-stages">
         {roadmapSections.map((stage) => {
           const lessons = allLessons.filter((lesson) => lesson.day >= stage.startDay && lesson.day <= stage.endDay);
           return (
@@ -881,7 +898,8 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
             </section>
           );
         })}
-      </div>
+        </div>
+      </section>
     </section>
   );
 }
