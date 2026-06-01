@@ -781,13 +781,739 @@ const buildAssociateGuidedSteps = (spec: AssociateLabSpec): MentorStep[] => {
   });
 };
 
+const deepDiveLabSpecs: Record<number, AssociateLabSpec> = {
+  16: {
+    scenario:
+      "Production 版本已經能部署，但主管問：這套系統現在有哪些安全風險？今天要用 Security Specialty intro 的角度審查 IAM、Security Group、CORS、APP_DEBUG、Redis password 與 security headers。",
+    whyItMatters:
+      "安全強化不是等到上線後才補。APP_DEBUG、過寬 Security Group、長期 AWS key、過度 CORS、secret 出現在 image/logs，都是 production review 會直接被打回的風險。",
+    todayGoal: "產出 IAM/SG/CORS/APP_DEBUG audit checklist 與 security risk register。",
+    previousContext: "Day 15 已建立 observability baseline；今天用它作為安全審查時的 evidence 入口。",
+    nextContext: "Day 17 會進入 multi-tenant architecture，安全邊界會延伸到租戶與資料隔離。",
+    command:
+      "aws ec2 describe-security-groups --group-ids <alb-sg> <app-sg> <db-sg>\naws ecs describe-task-definition --task-definition ticketfactory-web\naws iam list-attached-role-policies --role-name <ecs-task-role>\ncurl -I https://<domain>",
+    pitfall: "只把安全理解成加密或 WAF，卻沒有檢查 APP_DEBUG、CORS、IAM role、security group、secret exposure 這些實際會被掃到的點。",
+    documentSpec: [
+      "Production risk: APP_DEBUG=true、CORS=*、DB/Redis SG public、task role 權限過大、secret 出現在 image/log。",
+      "Detection: describe-security-groups、describe-task-definition、curl headers、repo/env/image secret scan。",
+      "Remediation: 收斂 SG、關閉 debug、限制 CORS origin、拆 execution role/task role、改用 Secrets Manager/SSM。",
+      "Preventive control: release 前 security checklist、least privilege review、secret rotation、headers/CORS regression check。"
+    ],
+    steps: [
+      "Risk: 列出 TicketFactory production security risk register，至少含 IAM、SG、CORS、APP_DEBUG、Secrets。",
+      "Detect: 用 AWS CLI 與 curl headers 收集目前可觀測證據。",
+      "Remediate: 對每個風險寫出修復方式與 rollback/impact。",
+      "Prevent: 建立 release 前 security gate，不讓 debug、public DB、wildcard CORS 進 production。",
+      "Defend: 用 3 分鐘回答：這套系統目前最可能被攻擊的入口是什麼？"
+    ],
+    acceptance: [
+      "有 IAM/SG/CORS/APP_DEBUG audit checklist。",
+      "能說明 execution role、task role、human deploy role 的權限邊界。",
+      "能用證據指出 DB/Redis 沒有 public exposure。",
+      "有至少 5 個 security risk、偵測方式、修復方式、預防控制。",
+      "能回答主管：目前還有哪些 security gap 不阻擋上線、哪些必須先修。"
+    ],
+    examMapping: [
+      "Security Specialty intro: IAM least privilege、secret management、network exposure review。",
+      "SAA-C03: Design Secure Architectures - secure access and application workloads。",
+      "DevOps Pro prep: automated security gates before release."
+    ],
+    deliverables: [
+      "IAM/SG/CORS/APP_DEBUG audit checklist",
+      "security risk register",
+      "secret exposure checklist",
+      "security remediation plan",
+      "defense question answer"
+    ],
+    quickQuestions: [
+      { id: "debug-risk", question: "APP_DEBUG=true 最大問題是什麼？", answer: "錯誤頁可能暴露 env、stack trace、路徑、SQL 或 secret 線索，production 必須關閉。" },
+      { id: "sg-defense", question: "如何證明 DB 沒有公開？", answer: "用 SG matrix 和 describe-security-groups 證明 DB 只接受 app security group，而不是 0.0.0.0/0。" }
+    ]
+  },
+  17: {
+    scenario:
+      "課程平台開始支援多 tenant。今天要把 tenant isolation 從 UI selector 變成資料、API、admin、progress 都一致遵守的 boundary。",
+    whyItMatters:
+      "Multi-tenant 最大風險不是畫面選錯 tenant，而是 API query、admin dashboard、progress、export 忘了 tenant scope，造成跨租戶資料外洩。",
+    todayGoal: "產出 tenant isolation model、data boundary table、cross-tenant leakage test plan。",
+    previousContext: "Day 16 已審查安全邊界；今天把安全邊界延伸到租戶與資料隔離。",
+    nextContext: "Day 18 會處理 RDS migration，tenant-aware schema change 會影響資料隔離。",
+    command:
+      "rg \"tenant_id|tenant\" app resources src\npsql \"$DATABASE_URL\" -c \"select tenant_id, count(*) from learning_progress group by tenant_id;\"\nphp artisan test --filter=TenantIsolation\ncurl -H \"X-Tenant: cerry-lab\" https://<api-domain>/api/progress",
+    pitfall: "只在前端顯示 tenant selector，後端 query 沒有強制 tenant scope，資料外洩時 UI 看起來仍然正常。",
+    documentSpec: [
+      "Production risk: user 可透過 API、admin、export 或 progress endpoint 讀到其他 tenant 資料。",
+      "Detection: tenant_id query audit、API test、admin dashboard scope check、資料匯出檢查。",
+      "Remediation: middleware 注入 tenant context、repository/query scope、DB unique/index 加 tenant key。",
+      "Preventive control: tenant isolation tests、seeded cross-tenant fixtures、PR checklist。"
+    ],
+    steps: [
+      "Risk: 寫出 tenant context 從 auth 到 DB query 的傳遞路徑。",
+      "Detect: 搜尋 tenant_id 使用點，找出 query/export/admin 是否漏 scope。",
+      "Remediate: 草擬 middleware、policy、repository scope、DB index 的修復策略。",
+      "Prevent: 建立 cross-tenant leakage test plan。",
+      "Defend: 回答：你的 tenant isolation 是 UI 層、API 層還是資料層保證？"
+    ],
+    acceptance: [
+      "有 tenant isolation model。",
+      "data boundary table 覆蓋 user、role、progress、course、admin/export。",
+      "能說明 tenant_id 應在哪些 query/index/unique key 出現。",
+      "有 cross-tenant leakage test plan。",
+      "能回答如果 tenant context 缺失，系統應該 fail closed 還是 fail open。"
+    ],
+    examMapping: [
+      "SaaS architecture: tenant context propagation and isolation controls。",
+      "Security Specialty intro: authorization boundary and data access controls。",
+      "SA Pro prep: multi-tenant tradeoff between shared schema and isolated resources."
+    ],
+    deliverables: [
+      "tenant isolation model",
+      "data boundary table",
+      "cross-tenant leakage test plan",
+      "tenant-aware index checklist",
+      "defense answer"
+    ],
+    quickQuestions: [
+      { id: "tenant-ui-risk", question: "只靠前端 tenant selector 夠嗎？", answer: "不夠。後端 API、query、policy、DB constraint 都要能阻擋跨租戶資料存取。" },
+      { id: "fail-mode", question: "tenant context 缺失時應該怎麼做？", answer: "除非是明確 public resource，否則應 fail closed，拒絕請求或回空集合。" }
+    ]
+  },
+  18: {
+    scenario:
+      "Production database 要做 schema change。今天不是直接 `php artisan migrate --force`，而是設計 backup、expand-contract、verification、rollback/forward-fix runbook。",
+    whyItMatters:
+      "資料庫 migration 是最難 rollback 的部署風險之一。沒有 snapshot、相容策略、驗證 query 和回復路徑，部署失敗會變成資料事故。",
+    todayGoal: "產出 migration runbook、backup/rollback plan、expand-contract checklist。",
+    previousContext: "Day 17 建立 tenant boundary；今天確保 migration 不破壞 tenant data 與 production traffic。",
+    nextContext: "Day 19 會處理 S3 uploads，繼續把 stateful data flow 變成可控流程。",
+    command:
+      "aws rds describe-db-snapshots --db-instance-identifier ticketfactory-prod\naws rds create-db-snapshot --db-instance-identifier ticketfactory-prod --db-snapshot-identifier pre-migration-<date>\nphp artisan migrate --pretend\nphp artisan migrate --force",
+    pitfall: "把所有 migration 都當成可 rollback；drop column、data transform、rename 欄位常需要 forward fix 或 expand-contract。",
+    documentSpec: [
+      "Production risk: 不相容 schema change 讓新舊 ECS task 或 worker 同時失敗。",
+      "Detection: migrate --pretend、schema diff、snapshot existence、smoke query、worker log。",
+      "Remediation: expand-contract、feature flag、backfill job、restore snapshot 或 forward fix。",
+      "Preventive control: migration gate、DB backup checkpoint、tenant fixture verification。"
+    ],
+    steps: [
+      "Risk: 分類 migration 是 additive、destructive、data transform 還是 long-running。",
+      "Detect: 檢查 snapshot、pretend SQL、受影響 query、worker job。",
+      "Remediate: 寫出 expand-contract 或 restore/forward-fix 路徑。",
+      "Prevent: 建立 migration gate 和 production approval checklist。",
+      "Defend: 回答：這次 migration 能 rollback 嗎？不能的部分如何處理？"
+    ],
+    acceptance: [
+      "有 migration runbook。",
+      "有 RDS snapshot/backup checkpoint。",
+      "能分辨 reversible rollback 與 forward fix。",
+      "有 migration validation query 與 app/worker smoke test。",
+      "有 tenant-aware migration risk note。"
+    ],
+    examMapping: [
+      "DevOps Pro prep: deployment safety, migration gates, rollback strategy。",
+      "Reliability pillar: backup and restore planning for stateful services。",
+      "DVA-C02: deployment and troubleshooting of application changes."
+    ],
+    deliverables: [
+      "migration runbook",
+      "backup/rollback plan",
+      "expand-contract checklist",
+      "validation query list",
+      "forward-fix decision note"
+    ],
+    quickQuestions: [
+      { id: "rollback-limit", question: "為什麼 migration rollback 特別危險？", answer: "因為資料可能已被寫入新 schema，drop/rename/data transform 往往不能安全倒回。" },
+      { id: "expand-contract", question: "expand-contract 是什麼？", answer: "先新增相容結構並部署相容 app，完成 backfill 後，下一版再移除舊結構。" }
+    ]
+  },
+  19: {
+    scenario:
+      "Uploads 不能留在 container local disk，也不能為了方便把 bucket public。今天設計 private S3 upload flow、signed URL policy、tenant-aware object key。",
+    whyItMatters:
+      "檔案上傳同時牽涉安全、成本、效能與資料隔離。public bucket、無限制 presigned URL、錯誤 CORS、object key 沒 tenant scope 都會變成 production 事故。",
+    todayGoal: "產出 private upload flow、signed URL policy、bucket access checklist。",
+    previousContext: "Day 18 處理 DB state；今天處理 object storage state。",
+    nextContext: "Day 20 會處理 WebSocket/Reverb，讓即時事件和 storage/data flow 分開維運。",
+    command:
+      "aws s3api get-public-access-block --bucket <uploads-bucket>\naws s3api get-bucket-policy-status --bucket <uploads-bucket>\naws s3 presign s3://<uploads-bucket>/<tenant-id>/sample.png --expires-in 300\ncurl -I \"<presigned-url>\"",
+    pitfall: "把 bucket 設 public 來修前端顯示問題，等於繞過 Laravel authorization 與 tenant isolation。",
+    documentSpec: [
+      "Production risk: public bucket、過長 TTL、object key 無 tenant scope、CORS 過寬。",
+      "Detection: public access block、policy status、signed URL TTL、CORS rule、object key audit。",
+      "Remediation: private bucket、短效 presigned URL、content-type/size limit、tenant-scoped key。",
+      "Preventive control: upload policy test、bucket policy review、lifecycle/retention policy。"
+    ],
+    steps: [
+      "Risk: 畫出 Browser -> Laravel signer -> S3 private object 的責任分界。",
+      "Detect: 檢查 bucket public access、policy status、CORS、URL TTL。",
+      "Remediate: 寫出 signed URL policy 與 tenant object key convention。",
+      "Prevent: 建立 upload regression checklist。",
+      "Defend: 回答：使用者如何下載私有檔案但 bucket 仍不公開？"
+    ],
+    acceptance: [
+      "有 private upload flow。",
+      "signed URL policy 包含 TTL、content type、size、tenant object key。",
+      "能證明 bucket public access block 開啟。",
+      "CORS 只允許必要 origin/method/header。",
+      "有檔案誤刪或 URL 過期 recovery note。"
+    ],
+    examMapping: [
+      "Security / SAA: private S3 access, presigned URLs, least privilege object access。",
+      "SAA-C03: secure data access and resilient storage design。",
+      "SaaS architecture: tenant-aware object key and authorization."
+    ],
+    deliverables: [
+      "private upload flow",
+      "signed URL policy",
+      "bucket access checklist",
+      "tenant object key convention",
+      "upload recovery note"
+    ],
+    quickQuestions: [
+      { id: "public-bucket", question: "為什麼不能直接 public bucket？", answer: "public bucket 會繞過 app authorization，可能暴露私有檔案與跨租戶資料。" },
+      { id: "url-ttl", question: "signed URL 的 TTL 為什麼要短？", answer: "URL 持有人可在有效期內執行授權動作，TTL 太長會擴大洩漏後的影響。" }
+    ]
+  },
+  20: {
+    scenario:
+      "TicketFactory 需要即時通知與 WebSocket/Reverb。今天要設計 ALB WebSocket routing、timeout、Redis pub/sub、service separation。",
+    whyItMatters:
+      "WebSocket 是長連線，不應被當成普通 HTTP request。ALB idle timeout、sticky/session、Reverb runtime、Redis pub/sub 都會影響穩定性。",
+    todayGoal: "產出 ALB WebSocket routing、Redis pub/sub diagram、long-connection runbook。",
+    previousContext: "Day 19 完成 private upload flow；今天處理即時事件通道。",
+    nextContext: "Day 21 會進入高併發訂票一致性，WebSocket 只負責通知，不應取代交易一致性。",
+    command:
+      "aws elbv2 describe-listeners --load-balancer-arn <alb-arn>\naws elbv2 describe-target-groups --names ticketfactory-reverb\naws logs tail /ecs/ticketfactory-reverb --follow\nredis-cli -h <redis-endpoint> pubsub channels",
+    pitfall: "把 WebSocket 通知當作交易成功依據；真正一致性仍要靠 DB transaction、lock、queue，而不是前端收到事件。",
+    documentSpec: [
+      "Production risk: ALB timeout、target unhealthy、Redis pub/sub 中斷、web/API 與 Reverb 混在同 service。",
+      "Detection: listener rule、target health、Reverb logs、Redis pubsub channels、client reconnect rate。",
+      "Remediation: separate Reverb service、ALB timeout tuning、Redis connectivity check、client reconnect/backoff。",
+      "Preventive control: WebSocket smoke test、connection metric、broadcast failure alarm。"
+    ],
+    steps: [
+      "Risk: 畫出 HTTP API 與 WebSocket long connection 的差異。",
+      "Detect: 檢查 ALB listener/target group、Reverb logs、Redis pub/sub。",
+      "Remediate: 規劃 Reverb service boundary 與 timeout/reconnect 策略。",
+      "Prevent: 建立 WebSocket smoke test 與 alarm。",
+      "Defend: 回答：WebSocket 掛掉時，訂票交易是否仍正確？"
+    ],
+    acceptance: [
+      "有 ALB WebSocket routing diagram。",
+      "有 Redis pub/sub diagram。",
+      "能分辨即時通知與交易一致性。",
+      "有 connection timeout/reconnect strategy。",
+      "有 Reverb service logs/target health 驗證方式。"
+    ],
+    examMapping: [
+      "Advanced app deployment: long-running connection routing and service separation。",
+      "SAA-C03: resilient traffic routing and application integration。",
+      "Performance/reliability prep: graceful degradation for real-time features."
+    ],
+    deliverables: [
+      "ALB WebSocket routing diagram",
+      "Redis pub/sub diagram",
+      "Reverb service boundary",
+      "timeout/reconnect strategy",
+      "WebSocket degradation note"
+    ],
+    quickQuestions: [
+      { id: "ws-not-tx", question: "WebSocket 可以當作交易成功依據嗎？", answer: "不行。WebSocket 是通知通道，交易一致性仍要由 DB transaction/lock/queue 保證。" },
+      { id: "timeout", question: "WebSocket 上 ALB 最常見雷點？", answer: "idle timeout、target health、client reconnect/backoff 沒設計，導致長連線不穩。" }
+    ]
+  },
+  21: {
+    scenario:
+      "TicketFactory 搶票情境遇到大量併發。今天要設計 lock、DB transaction、queue consistency，避免 oversell 與重複確認。",
+    whyItMatters:
+      "高併發不是只把 ECS desired count 拉高。若資料一致性設計錯，scale out 只會讓超賣更快發生。",
+    todayGoal: "產出 lock/transaction/queue consistency decision table 與 oversell failure analysis。",
+    previousContext: "Day 20 已把 WebSocket 當成通知通道；今天處理真正的交易一致性。",
+    nextContext: "Day 22 會把 web/worker scaling policy 建立在可量測負載上。",
+    command:
+      "redis-cli -h <redis-endpoint> --scan --pattern 'lock:*'\npsql \"$DATABASE_URL\" -c \"select ticket_id, count(*) from orders group by ticket_id having count(*) > capacity;\"\naws logs tail /ecs/ticketfactory-worker --since 15m",
+    pitfall: "用 queue 取代 transaction，以為排進 queue 就代表庫存安全；真正的庫存扣減仍要在一致性邊界內完成。",
+    documentSpec: [
+      "Production risk: oversell、duplicate job、lock timeout、transaction deadlock、queue retry storm。",
+      "Detection: oversell query、failed_jobs、lock key scan、worker logs、p95 latency。",
+      "Remediation: Redis lock + DB transaction、idempotency key、unique constraint、retry/backoff。",
+      "Preventive control: load test, concurrency test, invariant query, queue retry policy。"
+    ],
+    steps: [
+      "Risk: 定義訂票 invariants：不能超賣、不能重複確認、不能遺失訂單。",
+      "Detect: 寫出 oversell/duplicate 檢查 query 與 worker log 檢查方式。",
+      "Remediate: 設計 lock、transaction、idempotency、unique constraint 的使用邊界。",
+      "Prevent: 建立 concurrency test 與 queue retry policy。",
+      "Defend: 回答：scale out 到 10 個 worker 後，為什麼不會超賣？"
+    ],
+    acceptance: [
+      "有 consistency decision table。",
+      "能說明 lock、transaction、queue、idempotency 各自保護什麼。",
+      "有 oversell detection query。",
+      "有 queue retry/backoff 與 failed job recovery 策略。",
+      "能回答 scale out 不破壞一致性的原因。"
+    ],
+    examMapping: [
+      "Performance / reliability: concurrency control and invariant protection。",
+      "DVA-C02: troubleshooting async workflows and retries。",
+      "SA Pro prep: tradeoff between throughput, consistency, and user experience."
+    ],
+    deliverables: [
+      "lock/transaction/queue consistency decision table",
+      "oversell detection query",
+      "idempotency strategy",
+      "queue retry policy",
+      "load test note"
+    ],
+    quickQuestions: [
+      { id: "queue-limit", question: "queue 能不能保證不超賣？", answer: "queue 只能排隊處理，不能自動保證資料一致性；庫存扣減仍需要 transaction/lock/constraint。" },
+      { id: "idempotency", question: "idempotency key 解決什麼？", answer: "避免重試、重送或 worker retry 造成重複建立同一筆交易結果。" }
+    ]
+  },
+  22: {
+    scenario:
+      "系統開始有流量變化。今天要把 autoscaling 從『CPU 高就加機器』改成 web request、CPU/memory、queue depth、worker latency 的 capacity model。",
+    whyItMatters:
+      "web 和 worker 的瓶頸不同。只看 CPU 可能看不到 queue backlog，只看 request count 也可能忽略 DB connection 或 memory pressure。",
+    todayGoal: "產出 ECS scaling policy、queue depth scaling model、capacity test checklist。",
+    previousContext: "Day 21 已定義併發一致性邊界；今天設計擴展策略時不能破壞它。",
+    nextContext: "Day 23 會把 capacity decision 轉成 cost review。",
+    command:
+      "aws application-autoscaling describe-scalable-targets --service-namespace ecs\naws application-autoscaling describe-scaling-policies --service-namespace ecs\naws cloudwatch get-metric-data --metric-data-queries file://capacity-metrics.json\naws ecs describe-services --cluster ticketfactory --services web worker",
+    pitfall: "web service 和 worker service 用同一個 scaling signal，結果 web 擴了但 queue 堆積，或 worker 擴太多打爆 DB。",
+    documentSpec: [
+      "Production risk: under-scaling、over-scaling、queue backlog、DB connection exhaustion、cold start delay。",
+      "Detection: ALB request count、ECS CPU/memory、queue depth、worker latency、RDS connections。",
+      "Remediation: web target tracking、worker queue depth scaling、max capacity guardrail、DB connection pool tuning。",
+      "Preventive control: capacity test、scaling alarm、scheduled scaling、cost guardrail。"
+    ],
+    steps: [
+      "Risk: 分別定義 web、worker、scheduler 的 scaling risk。",
+      "Detect: 選擇每個 workload 對應的 metrics。",
+      "Remediate: 草擬 ECS target tracking 與 queue depth scaling policy。",
+      "Prevent: 設計 capacity test 與 max/min guardrail。",
+      "Defend: 回答：你的 worker scaling 為什麼不會打爆 RDS？"
+    ],
+    acceptance: [
+      "有 ECS scaling policy 草案。",
+      "有 queue depth scaling model。",
+      "能分辨 web request scaling 與 worker backlog scaling。",
+      "有 DB connection/cost guardrail。",
+      "有 capacity test checklist。"
+    ],
+    examMapping: [
+      "CloudOps Engineer Associate (SOA-C03): monitoring, scaling, capacity operations。",
+      "DevOps Pro prep: automated scaling with guardrails。",
+      "SAA-C03: high-performing and resilient architecture design."
+    ],
+    deliverables: [
+      "ECS scaling policy",
+      "queue depth scaling model",
+      "capacity metric map",
+      "DB connection guardrail",
+      "capacity test checklist"
+    ],
+    quickQuestions: [
+      { id: "cpu-not-enough", question: "為什麼 CPU 不一定是好 scaling signal？", answer: "queue backlog、request count、latency、DB connection 才可能是真正瓶頸；CPU 可能正常但使用者已經等待。" },
+      { id: "worker-risk", question: "worker 擴太多有什麼風險？", answer: "可能造成 DB connection exhaustion、lock contention、第三方 API rate limit 或 job retry storm。" }
+    ]
+  },
+  23: {
+    scenario:
+      "架構能跑也能擴，但成本開始累積。今天要拆 NAT Gateway、RDS、Fargate、CloudWatch、CloudFront 成本來源，提出不犧牲安全/可靠性的優化。",
+    whyItMatters:
+      "成本優化不是把服務關掉，而是理解固定成本、流量成本、儲存成本、log retention、過度配置與架構取捨。",
+    todayGoal: "產出 NAT/RDS/Fargate/CloudWatch cost review 與 cost optimization decision table。",
+    previousContext: "Day 22 已定義 capacity model；今天檢查 capacity 是否造成不必要成本。",
+    nextContext: "Day 24 會進入 DR，成本和 RPO/RTO 會互相拉扯。",
+    command:
+      "aws ce get-cost-and-usage --time-period Start=2026-06-01,End=2026-06-30 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE\naws logs describe-log-groups\naws rds describe-db-instances\naws ecs describe-services --cluster ticketfactory --services web worker",
+    pitfall: "為了省 NAT 或 RDS 成本，把 private resource 改 public；這是用安全風險換帳單下降，通常不可接受。",
+    documentSpec: [
+      "Production risk: NAT data processing、RDS overprovisioning、Fargate idle desired count、CloudWatch retention 過長。",
+      "Detection: Cost Explorer by service/tag、log retention、RDS size/utilization、ECS desired count。",
+      "Remediation: rightsizing、scheduled scaling、log retention policy、VPC endpoint、reserved/savings options 評估。",
+      "Preventive control: budget alarm、tagging policy、monthly cost review、cost per environment report。"
+    ],
+    steps: [
+      "Risk: 列出成本來源與它們保護的可靠性/安全價值。",
+      "Detect: 用 Cost Explorer 與服務 describe 指令找出 top cost drivers。",
+      "Remediate: 寫出 rightsizing、retention、scaling、VPC endpoint 等優化選項。",
+      "Prevent: 建立 budget alarm 與 tag policy。",
+      "Defend: 回答：哪一項成本不能省，因為省了會提高 production risk？"
+    ],
+    acceptance: [
+      "有 NAT/RDS/Fargate/CloudWatch cost review。",
+      "能分辨固定成本、流量成本、儲存/log 成本。",
+      "有 cost optimization decision table。",
+      "有 budget/tagging/monthly review control。",
+      "能說明哪些成本是為了安全或可靠性必須保留。"
+    ],
+    examMapping: [
+      "Cost pillar: cost visibility, right sizing, budget controls。",
+      "SAA-C03: Design Cost-Optimized Architectures。",
+      "SA Pro prep: tradeoff between cost, security, and reliability."
+    ],
+    deliverables: [
+      "NAT/RDS/Fargate/CloudWatch cost review",
+      "cost optimization decision table",
+      "budget alarm plan",
+      "tagging policy",
+      "cost tradeoff defense"
+    ],
+    quickQuestions: [
+      { id: "bad-saving", question: "最危險的省錢方式是什麼？", answer: "把原本 private 的 DB/Redis/app resource 改 public，這是用安全風險換成本下降。" },
+      { id: "cost-signal", question: "成本 review 要先看什麼？", answer: "先用服務、環境、tag 分組找 top drivers，再判斷是固定成本、流量成本還是保留策略問題。" }
+    ]
+  },
+  24: {
+    scenario:
+      "Production database 收到壞 migration 或資料誤刪。今天要設計 RPO/RTO、RDS snapshot restore、S3 versioning、incident communication。",
+    whyItMatters:
+      "備份存在不等於可以復原。DR 要證明 restore path、驗證方式、切換方式、溝通節奏都能在 RTO 內完成。",
+    todayGoal: "產出 RPO/RTO table、restore runbook、restore validation checklist、incident communication note。",
+    previousContext: "Day 23 已討論成本；今天明確說明為了達成 RPO/RTO 需要付出哪些成本。",
+    nextContext: "Day 25 會把手動 DR/部署資源整理成 IaC module boundary。",
+    command:
+      "aws rds describe-db-snapshots --db-instance-identifier ticketfactory-prod\naws rds restore-db-instance-from-db-snapshot --db-instance-identifier ticketfactory-restore --db-snapshot-identifier <snapshot-id>\naws s3api get-bucket-versioning --bucket <uploads-bucket>\naws route53 list-resource-record-sets --hosted-zone-id <zone-id>",
+    pitfall: "只有自動備份但從未 restore drill；真正事故時才發現 snapshot 太舊、restore 太慢、app env/DNS 切換沒文件。",
+    documentSpec: [
+      "Production risk: bad migration、資料誤刪、RDS failure、S3 object overwrite、region/service incident。",
+      "Detection: alarm、audit log、bad deploy correlation、data validation query、user report。",
+      "Remediation: RDS snapshot restore、S3 version restore、DNS/app env switch、read-only mode。",
+      "Preventive control: DR drill、backup retention policy、restore validation checklist、incident comms template。"
+    ],
+    steps: [
+      "Risk: 定義 TicketFactory 的 RPO/RTO 與資料重要性。",
+      "Detect: 建立資料事故偵測訊號與決策點。",
+      "Remediate: 寫出 RDS restore、S3 version restore、app switch runbook。",
+      "Prevent: 設計 DR drill 與 incident communication note。",
+      "Defend: 回答：如果壞 migration 已寫入 10 分鐘，你能接受遺失多少資料？"
+    ],
+    acceptance: [
+      "有 RPO/RTO table。",
+      "有 restore runbook。",
+      "有 restore validation checklist。",
+      "有 incident communication note。",
+      "能說明 backup retention、restore time、資料遺失容忍度。"
+    ],
+    examMapping: [
+      "Reliability pillar: RPO/RTO, backup, restore, disaster recovery drills。",
+      "SA Pro prep: business continuity tradeoffs。",
+      "CloudOps Engineer Associate (SOA-C03): backup/restore operations and incident response."
+    ],
+    deliverables: [
+      "RPO/RTO table",
+      "restore runbook",
+      "restore validation checklist",
+      "incident communication note",
+      "DR drill evidence plan"
+    ],
+    quickQuestions: [
+      { id: "backup-vs-restore", question: "有備份等於有 DR 嗎？", answer: "不等於。DR 要證明能在 RTO 內 restore、驗證、切換並溝通。" },
+      { id: "rpo", question: "RPO 問的是什麼？", answer: "可以接受遺失多久的資料，例如最後 5 分鐘、15 分鐘或 1 小時。" }
+    ]
+  },
+  25: {
+    scenario:
+      "前面多數 AWS 資源可能是手動建立。今天把 network、compute、data、observability、security 整理成 Terraform/CDK module boundary。",
+    whyItMatters:
+      "手動 console 建資源很適合學習，但不適合 production 長期維運。IaC 讓變更可審查、可重建、可追蹤，也讓環境差異更可控。",
+    todayGoal: "產出 Terraform/CDK module boundary map、state/secrets decision note、plan review checklist。",
+    previousContext: "Day 24 已定義 DR runbook；今天把可重建性提升到 infrastructure 層。",
+    nextContext: "Day 26 會把 IaC plan、approval、release note 串進 release governance。",
+    command:
+      "terraform init\nterraform plan -out=tfplan\nterraform show tfplan\naws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=TicketFactory",
+    pitfall: "一開始就把所有資源塞進單一 Terraform module，導致 network、data、app、ops 生命週期互相綁死。",
+    documentSpec: [
+      "Production risk: console drift、不可重建、環境差異、state 機敏資料、module 邊界混亂。",
+      "Detection: resource inventory、terraform plan drift、tag audit、state review。",
+      "Remediation: module boundary、remote state、import strategy、secrets 不進 state 的處理。",
+      "Preventive control: plan review、approval gate、module ownership、drift detection schedule。"
+    ],
+    steps: [
+      "Risk: 列出手動資源與不可重建風險。",
+      "Detect: 用 tagging/resource inventory 找出 AWS resource 清單。",
+      "Remediate: 畫出 network/app/data/ops/security module boundary。",
+      "Prevent: 建立 plan review 與 drift detection checklist。",
+      "Defend: 回答：為什麼 RDS 和 app service 不一定放同一個 module？"
+    ],
+    acceptance: [
+      "有 Terraform/CDK module boundary map。",
+      "能說明 state、secret、import 的風險。",
+      "有 resource inventory/tagging strategy。",
+      "有 plan review checklist。",
+      "有 drift detection 和 ownership note。"
+    ],
+    examMapping: [
+      "DevOps Pro prep: IaC, change review, drift management。",
+      "CloudOps Engineer Associate (SOA-C03): provisioning and automation。",
+      "SA Pro prep: module boundaries and environment consistency."
+    ],
+    deliverables: [
+      "Terraform/CDK module boundary map",
+      "resource inventory",
+      "state/secrets decision note",
+      "plan review checklist",
+      "drift detection note"
+    ],
+    quickQuestions: [
+      { id: "module-boundary", question: "module 邊界怎麼切？", answer: "依生命週期和責任切，例如 network、data、app、observability、安全，而不是全部塞一起。" },
+      { id: "state-risk", question: "Terraform state 有什麼風險？", answer: "state 可能包含資源資訊甚至敏感值，要使用 remote backend、權限控制和 secret 管理策略。" }
+    ]
+  },
+  26: {
+    scenario:
+      "系統可以部署，也有 IaC plan。今天要補 release governance：誰批准、何時上線、改了什麼、如何 rollback、證據在哪。",
+    whyItMatters:
+      "沒有 governance 的 deployment 很難被團隊信任。Production change 需要 scope、risk、approval、evidence、audit trail，不只是工程師自己按 deploy。",
+    todayGoal: "產出 approval flow、change log、audit trail、release checklist。",
+    previousContext: "Day 25 已把 infrastructure change 變成可審查 plan；今天把審查流程制度化。",
+    nextContext: "Day 27 會進入 performance review，把 release 後的效能驗收納入 evidence。",
+    command:
+      "gh run list --workflow deploy-pages.yml --limit 5\ngh run view <run-id> --log\naws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=UpdateService\naws ecs describe-services --cluster ticketfactory --services web",
+    pitfall: "只有 CI 綠燈但沒有 release note、approval、rollback owner、post-deploy evidence，出事後沒人知道變更脈絡。",
+    documentSpec: [
+      "Production risk: unauthorized change、missing rollback owner、no release evidence、audit trail incomplete。",
+      "Detection: GitHub run log、CloudTrail event、ECS deployment event、release note completeness。",
+      "Remediation: approval gate、change template、rollback owner、post-deploy evidence checklist。",
+      "Preventive control: environment protection rule、required review、release calendar、audit retention。"
+    ],
+    steps: [
+      "Risk: 定義 production change 的 scope/risk/owner。",
+      "Detect: 收集 GitHub Actions run、CloudTrail、ECS deployment event。",
+      "Remediate: 寫出 approval flow 與 rollback ownership。",
+      "Prevent: 建立 release checklist 與 audit trail policy。",
+      "Defend: 回答：誰批准這次 production change？證據在哪？"
+    ],
+    acceptance: [
+      "有 approval flow。",
+      "有 change log template。",
+      "有 audit trail checklist。",
+      "能追到 deploy run、ECS service event、CloudTrail event。",
+      "有 rollback owner 與 post-deploy evidence。"
+    ],
+    examMapping: [
+      "Governance: approval, change log, audit trail, production controls。",
+      "DevOps Pro prep: release management and deployment governance。",
+      "Security Specialty intro: auditability and least privilege change access."
+    ],
+    deliverables: [
+      "approval flow",
+      "change log template",
+      "audit trail checklist",
+      "rollback ownership matrix",
+      "post-deploy evidence checklist"
+    ],
+    quickQuestions: [
+      { id: "green-not-enough", question: "CI 綠燈為什麼不夠？", answer: "CI 只證明流程成功，不代表變更被批准、有風險紀錄、有 rollback owner 或 post-deploy evidence。" },
+      { id: "audit-evidence", question: "audit trail 要包含什麼？", answer: "誰改、改什麼、何時改、誰批准、部署結果、驗收證據、rollback 路徑。" }
+    ]
+  },
+  27: {
+    scenario:
+      "Production 可以跑，但使用者覺得慢。今天用 Laravel query、N+1、cache hit rate、queue latency、p95 來做 performance review。",
+    whyItMatters:
+      "效能問題常被誤判成加機器。若根因是 N+1 query、缺 index、cache miss、queue latency，擴 ECS 只會增加成本，不會修好體驗。",
+    todayGoal: "產出 N+1/cache/queue latency checklist、performance remediation plan。",
+    previousContext: "Day 26 建立 release evidence；今天把效能指標加入 release 後驗收。",
+    nextContext: "Day 28 會把所有架構面向整合成 final architecture review。",
+    command:
+      "aws logs tail /ecs/ticketfactory-web --since 30m\naws cloudwatch get-metric-data --metric-data-queries file://performance-metrics.json\nphp artisan model:show Order\npsql \"$DATABASE_URL\" -c \"select query, calls, mean_exec_time from pg_stat_statements order by mean_exec_time desc limit 10;\"",
+    pitfall: "看到慢就加 Fargate task，卻沒有先看 SQL count、p95、cache hit、queue delay，成本上升但瓶頸仍在。",
+    documentSpec: [
+      "Production risk: N+1 query、missing index、cache stampede、queue latency、slow external API。",
+      "Detection: p95 latency、SQL slow query、pg_stat_statements、cache hit rate、queue wait time。",
+      "Remediation: eager loading、index、query rewrite、cache key strategy、queue concurrency tuning。",
+      "Preventive control: performance budget、load test、query regression test、post-release latency gate。"
+    ],
+    steps: [
+      "Risk: 定義使用者感受到慢的路徑：API、DB、cache、queue、frontend。",
+      "Detect: 收集 p95、slow query、cache hit、queue latency。",
+      "Remediate: 寫出 N+1/index/cache/worker tuning 修復方案。",
+      "Prevent: 建立 performance budget 和 regression checklist。",
+      "Defend: 回答：這個慢問題應該加機器還是修 query？"
+    ],
+    acceptance: [
+      "有 N+1/cache/queue latency checklist。",
+      "能用 p95 而不是平均值討論使用者體驗。",
+      "有 slow query / index / cache remediation plan。",
+      "有 queue latency 與 worker concurrency 檢查。",
+      "能說明何時 scaling、何時優化程式。"
+    ],
+    examMapping: [
+      "Performance pillar: latency, throughput, caching, database optimization。",
+      "DVA-C02: troubleshooting and optimizing cloud applications。",
+      "SA Pro prep: distinguish scaling from application-level optimization."
+    ],
+    deliverables: [
+      "N+1/cache/queue latency checklist",
+      "performance metric map",
+      "slow query remediation plan",
+      "performance budget",
+      "scaling vs optimization decision"
+    ],
+    quickQuestions: [
+      { id: "p95", question: "為什麼看 p95？", answer: "平均值會掩蓋尾端使用者體驗；p95 更能看出大多數使用者是否穩定。" },
+      { id: "scale-or-query", question: "什麼情況不該先 scaling？", answer: "如果瓶頸是 N+1、缺 index、cache miss，先 scaling 只會提高成本，不會根治。" }
+    ]
+  },
+  28: {
+    scenario:
+      "30 天快結束，你需要用 Well-Architected 角度審查整體架構。今天把 security、reliability、performance、cost、operations 的 gap 整理成 final review。",
+    whyItMatters:
+      "能部署不代表 production-ready。Final Architecture Review 要能指出已完成證據、剩餘風險、取捨理由與下一步，而不是畫一張漂亮圖。",
+    todayGoal: "產出 Well-Architected review checklist、risk register、architecture decision record。",
+    previousContext: "Day 27 已補 performance review；今天把所有 pillar 整合。",
+    nextContext: "Day 29 會把 review 內容整理成 portfolio deployment report。",
+    command:
+      "aws wellarchitected list-workloads\naws wellarchitected get-lens --lens-alias wellarchitected\naws ecs describe-services --cluster ticketfactory --services web worker\naws cloudwatch describe-alarms",
+    pitfall: "Final review 只列服務名稱，不列 evidence、risk owner、remediation priority，導致無法判斷是否能上 production。",
+    documentSpec: [
+      "Production risk: architecture gap 未被記錄、無 owner、無 severity、無 remediation priority。",
+      "Detection: evidence checklist、Well-Architected questions、alarm/log/deploy artifact review。",
+      "Remediation: risk register、ADR、priority roadmap、explicit accepted risks。",
+      "Preventive control: recurring architecture review、pre-release review gate、owner assignment。"
+    ],
+    steps: [
+      "Risk: 依 security/reliability/performance/cost/operations 建立 review table。",
+      "Detect: 對照 Day 1-27 artifact，標記哪些有 evidence、哪些只是想法。",
+      "Remediate: 寫出 gap priority、owner、target date。",
+      "Prevent: 建立 recurring architecture review checklist。",
+      "Defend: 回答：這套架構目前最大的 accepted risk 是什麼？"
+    ],
+    acceptance: [
+      "有 Well-Architected review checklist。",
+      "有 risk register。",
+      "每個 gap 有 severity、owner、remediation priority。",
+      "能引用前面課程 artifact 當 evidence。",
+      "能清楚說明 accepted risk。"
+    ],
+    examMapping: [
+      "SAA / SA Pro prep: Well-Architected tradeoff and architecture review。",
+      "Professional prep: risk register and remediation planning。",
+      "Operations pillar: evidence-based production readiness review."
+    ],
+    deliverables: [
+      "Well-Architected review checklist",
+      "risk register",
+      "architecture decision record",
+      "accepted risk note",
+      "remediation roadmap"
+    ],
+    quickQuestions: [
+      { id: "ready", question: "production-ready 是什麼意思？", answer: "不是零風險，而是主要風險被辨識、可監控、可回復，且剩餘風險被明確接受。" },
+      { id: "evidence", question: "review 裡最重要的是什麼？", answer: "證據。每個 claim 都應連到 diagram、runbook、command output、dashboard 或 test。" }
+    ]
+  },
+  29: {
+    scenario:
+      "你已經有 28 天的 artifacts。今天要整理成 portfolio deployment report：問題、架構、部署流程、成本、安全、DR、demo script。",
+    whyItMatters:
+      "作品集不是截圖集合，而是一份能讓主管或面試官快速理解你如何從 Docker Compose 推進到 AWS production 的工程敘事。",
+    todayGoal: "產出 deployment report、architecture diagram、cost estimate、demo script。",
+    previousContext: "Day 28 已完成 final architecture review；今天把它整理成可展示作品集。",
+    nextContext: "Day 30 會用這份 report 進行 20 分鐘 capstone defense。",
+    command:
+      "git log --oneline --decorate -n 10\nfind docs -maxdepth 3 -type f | sort\naws ce get-cost-and-usage --time-period Start=2026-06-01,End=2026-06-30 --granularity MONTHLY --metrics UnblendedCost\nopen docs/deployment-report.md",
+    pitfall: "報告只貼 AWS service list，沒有問題脈絡、決策理由、驗證證據、成本估算和下一步，讀者看不出你的工程判斷。",
+    documentSpec: [
+      "Production risk: portfolio 無法被審查，claim 沒證據，成本/DR/rollback 缺失。",
+      "Detection: report coverage checklist、artifact links、diagram completeness、demo timing。",
+      "Remediation: 補問題敘事、artifact references、cost estimate、risk and next-step section。",
+      "Preventive control: report template、review checklist、demo rehearsal。"
+    ],
+    steps: [
+      "Risk: 列出 report 必須回答的主管/面試官問題。",
+      "Detect: 盤點 Day 1-28 artifacts，標記缺圖、缺證據、缺成本。",
+      "Remediate: 整理 deployment report 與 demo script。",
+      "Prevent: 建立 portfolio review checklist。",
+      "Defend: 用 5 分鐘講完 Docker Compose 到 AWS 的主線。"
+    ],
+    acceptance: [
+      "有 deployment report outline。",
+      "有 architecture diagram 與 artifact links。",
+      "有 cost estimate 與 risk/next-step section。",
+      "有 5-10 分鐘 demo script。",
+      "能把技術選型說成 problem -> decision -> evidence -> tradeoff。"
+    ],
+    examMapping: [
+      "Portfolio: demonstrate production deployment evidence and engineering judgment。",
+      "SA Pro prep: explain architecture tradeoffs to technical reviewers。",
+      "Career readiness: concise full-stack cloud deployment narrative."
+    ],
+    deliverables: [
+      "deployment report",
+      "architecture diagram",
+      "cost estimate",
+      "artifact index",
+      "demo script"
+    ],
+    quickQuestions: [
+      { id: "portfolio-value", question: "作品集最重要的是什麼？", answer: "工程判斷和證據，不是服務清單。要能說出問題、決策、結果、風險。" },
+      { id: "demo-time", question: "demo script 要多長？", answer: "建議 5-10 分鐘版本，另備 20 分鐘答辯版本給 Day 30。" }
+    ]
+  },
+  30: {
+    scenario:
+      "今天做 Capstone Defense。你要用 20 分鐘說明 Docker Compose 如何拆到 AWS、怎麼部署、如何 rollback、如何保護資料、如何監控、還有哪些風險。",
+    whyItMatters:
+      "真正的雲端能力不是背 AWS service，而是能在追問下 defend 你的架構。Day 30 要把前面所有 artifact 變成清楚、有證據、有取捨的答辯。",
+    todayGoal: "產出 20-minute defense script、Q&A bank、final readiness rubric。",
+    previousContext: "Day 29 已整理 portfolio report；今天把它轉成口頭答辯與 Q&A。",
+    nextContext: "30 天完成後，下一步是補真實 AWS execution evidence，從 L4 Professional Prep 走向 L5 Defense Ready。",
+    command:
+      "printf '1. compose mapping\\n2. deployment path\\n3. rollback\\n4. security\\n5. DR\\n6. cost\\n'\nopen docs/deployment-report.md\nopen docs/capstone-defense.md\naws ecs describe-services --cluster ticketfactory --services web worker",
+    pitfall: "答辯只講做了什麼，沒有回答為什麼、怎麼驗證、出事怎麼復原、哪些風險接受，聽起來就像照教學做完。",
+    documentSpec: [
+      "Production risk: defense 無法承受追問，缺 rollback、DR、cost、security、evidence。",
+      "Detection: Q&A rehearsal、rubric scoring、missing evidence list、timing check。",
+      "Remediation: 補強弱點答案、連回 artifact、標明 accepted risk 與 next steps。",
+      "Preventive control: final readiness rubric、Q&A bank、evidence index。"
+    ],
+    steps: [
+      "Risk: 列出 10 個 capstone 必答問題。",
+      "Detect: 用 rubric 檢查每題是否有 artifact/evidence 支撐。",
+      "Remediate: 補缺失答案，將回答整理成 20-minute script。",
+      "Prevent: 建立 final Q&A bank 和 next-step learning plan。",
+      "Defend: 完整演練一次：這套架構能上 production 嗎？"
+    ],
+    acceptance: [
+      "有 20-minute defense script。",
+      "有至少 10 題 Q&A bank。",
+      "每個回答都連到 diagram、runbook、command、dashboard 或 report。",
+      "有 final readiness rubric，能評估 L4/L5 差距。",
+      "能回答：如果主管問這能上 production 嗎，你如何有條件地回答。"
+    ],
+    examMapping: [
+      "Defense Ready: architecture explanation, tradeoff defense, operational readiness。",
+      "SA Pro prep: answer cross-domain architecture questions under scrutiny。",
+      "Professional portfolio: convert implementation evidence into senior engineering narrative."
+    ],
+    deliverables: [
+      "20-minute defense script",
+      "Q&A bank",
+      "final readiness rubric",
+      "evidence index",
+      "next-step learning plan"
+    ],
+    quickQuestions: [
+      { id: "production-answer", question: "主管問能上 production 嗎，能直接說可以嗎？", answer: "應該有條件回答：哪些已滿足、哪些風險已接受、哪些 blocker 必須先修、如何監控和 rollback。" },
+      { id: "defense-evidence", question: "答辯最怕什麼？", answer: "只有口頭描述沒有 evidence。每個 claim 都要能指到 artifact、command output、diagram 或 dashboard。" }
+    ]
+  }
+};
+
+const labSpecForDay = (day: number) => associateLabSpecs[day] ?? deepDiveLabSpecs[day];
+
 const commandForDay = (day: number, titleEn: string) => {
+  const labSpec = labSpecForDay(day);
   if (day === 1) return "docker-compose config --services\nlsof -nP -iTCP -sTCP:LISTEN";
   if (day === 2) return "docker compose config\ndocker compose --env-file .env.production.local up -d\ndocker compose ps\ncurl -I http://localhost:18080/health\ndocker compose logs --tail=80 api";
   if (day === 3) return "docker build -t ticketfactory-api:$(git rev-parse --short HEAD) .\ndocker run --rm ticketfactory-api:$(git rev-parse --short HEAD) php artisan --version\ndocker image inspect ticketfactory-api:$(git rev-parse --short HEAD)";
   if (day === 4) return "ssh ec2-user@<ec2-public-ip>\nsudo dnf update -y\nsudo dnf install -y docker\nsudo systemctl enable --now docker\ndocker compose version\ndocker compose up -d\ndocker compose ps\ncurl -I http://<ec2-public-ip>/health";
   if (day === 5) return "aws rds describe-db-instances\naws s3 ls\naws elasticache describe-cache-clusters\nredis-cli -h <redis-endpoint> ping";
-  if (associateLabSpecs[day]) return associateLabSpecs[day].command;
+  if (labSpec) return labSpec.command;
   if (titleEn.includes("ECR")) return "aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com";
   if (titleEn.includes("ECS")) return "aws ecs update-service --cluster ticketfactory --service web --force-new-deployment";
   if (titleEn.includes("CloudWatch")) return "aws logs tail /ecs/ticketfactory-web --follow";
@@ -797,11 +1523,12 @@ const commandForDay = (day: number, titleEn: string) => {
 };
 
 const pitfallForDay = (day: number) => {
+  const labSpec = labSpecForDay(day);
   if (day === 2) return "Production-like 不等於本機隨便跑；port、env、health endpoint、logs 都要留下證據，否則 Day4 上 EC2 只會把問題搬到雲端。";
   if (day === 3) return "Production image 不是 dev container；不要依賴 bind mount、latest tag、dev dependency 或 container local storage。";
   if (day === 4) return "EC2 first deploy 不是最終架構；重點是先建立可理解的 server/firewall/runtime/rollback 路徑，Security Group 不可為了方便全開。";
   if (day === 5) return "抽離 stateful service 時不要只改 endpoint；要同時處理 security boundary、backup/restore、migration rollback 與檔案權限。";
-  if (associateLabSpecs[day]) return associateLabSpecs[day].pitfall;
+  if (labSpec) return labSpec.pitfall;
   if (day <= 5) return "Deployment-first 不代表亂上線；每一天都要留下可以 rollback 與驗收的文件。";
   if (day <= 15) return "進階階段最常失敗在 boundary 沒切清楚：web、worker、scheduler、database、storage 要分開驗證。";
   return "深入階段不要只追服務可用，要能解釋安全、成本、可靠性、擴展與事件處理。";
@@ -838,6 +1565,16 @@ const sourceNotesForDay = (day: number, titleEn: string) => {
   }
   if (titleEn.includes("Health")) {
     notes.push("ALB health check tuning affects deployment speed; target group health settings must match the app readiness endpoint.");
+  }
+  if (day >= 16) {
+    notes.push("Well-Architected note: Deep Dive days use AWS Well-Architected pillars to organize risk, detection, remediation, preventive control, and defense evidence.");
+    notes.push("Certification note: AWS operations associate content is aligned to AWS Certified CloudOps Engineer - Associate (SOA-C03), not the older SysOps naming.");
+  }
+  if (titleEn.includes("Signed URL")) {
+    notes.push("S3 presigned URL note: a presigned URL grants temporary access to a specific operation and object; bucket policy and object key scope still matter.");
+  }
+  if (titleEn.includes("Disaster Recovery")) {
+    notes.push("RDS restore note: restoring from a DB snapshot creates a new DB instance, so endpoint switch, validation, and communication must be part of the runbook.");
   }
   return notes;
 };
@@ -1247,17 +1984,17 @@ const deploymentMentorScripts: Record<number, MentorScript> = {
 
 const buildMentorScript = (day: number, title: string, titleEn: string, summary: string, phase: Phase): MentorScript => {
   if (deploymentMentorScripts[day]) return deploymentMentorScripts[day];
-  if (associateLabSpecs[day]) {
-    const spec = associateLabSpecs[day];
+  const labSpec = labSpecForDay(day);
+  if (labSpec) {
     return {
-      scenario: spec.scenario,
-      whyItMatters: spec.whyItMatters,
-      todayGoal: spec.todayGoal,
-      previousContext: spec.previousContext,
-      nextContext: spec.nextContext,
-      guidedSteps: buildAssociateGuidedSteps(spec),
-      quickQuestions: spec.quickQuestions,
-      deliverables: spec.deliverables
+      scenario: labSpec.scenario,
+      whyItMatters: labSpec.whyItMatters,
+      todayGoal: labSpec.todayGoal,
+      previousContext: labSpec.previousContext,
+      nextContext: labSpec.nextContext,
+      guidedSteps: buildAssociateGuidedSteps(labSpec),
+      quickQuestions: labSpec.quickQuestions,
+      deliverables: labSpec.deliverables
     };
   }
 
@@ -1412,7 +2149,8 @@ const deploymentAcceptanceByDay: Record<number, string[]> = {
 };
 
 const examMappingForDay = (day: number, phase: Phase, titleEn: string) => {
-  if (associateLabSpecs[day]) return associateLabSpecs[day].examMapping;
+  const labSpec = labSpecForDay(day);
+  if (labSpec) return labSpec.examMapping;
   if (day <= 5) {
     return [
       "Cloud Practitioner / Foundational: understand shared responsibility, deployment basics, and core AWS service categories.",
@@ -1433,7 +2171,7 @@ const examMappingForDay = (day: number, phase: Phase, titleEn: string) => {
 const buildLesson = (day: number, topic: string[]) => {
   const [title, titleEn, summary] = topic;
   const phase = phaseForDay(day);
-  const associateSpec = associateLabSpecs[day];
+  const labSpec = labSpecForDay(day);
   const mentorScript = buildMentorScript(day, title, titleEn, summary, phase);
   return {
     day,
@@ -1450,7 +2188,7 @@ const buildLesson = (day: number, topic: string[]) => {
         : "完成一份 deep-dive review artifact，能向工程主管說明設計取捨與風險。",
     command: commandForDay(day, titleEn),
     pitfall: pitfallForDay(day),
-    documentSpec: associateSpec?.documentSpec ?? deploymentDocumentSpecByDay[day] ?? [
+    documentSpec: labSpec?.documentSpec ?? deploymentDocumentSpecByDay[day] ?? [
       `Learning note: ${titleEn} 的中文/English 概念、適用情境、與 TicketFactory 對應檔案。`,
       "Architecture spec: 畫出 before/after flow，標記 stateless service、stateful service、network boundary。",
       "Runbook: 寫出 setup、deploy、verify、rollback 四段指令，不留口頭步驟。",
@@ -1462,14 +2200,14 @@ const buildLesson = (day: number, topic: string[]) => {
       "Scenario UI: 使用者輸入自己的 project stack 後，應能看到本日對應的 AWS service mapping。",
       "Progress UI: 完成本日 checkpoint 後，tenant-scoped progress 更新。"
     ],
-    steps: associateSpec?.steps ?? deploymentStepsByDay[day] ?? [
+    steps: labSpec?.steps ?? deploymentStepsByDay[day] ?? [
       "Read: 先閱讀本日概念，確認你知道這個 AWS/Docker 元件解決什麼問題。",
       "Inspect: 對照 TicketFactory 的 docker-compose、Dockerfile、env、Nginx 或 Laravel config。",
       "Implement: 依照本日 lab 產出設定、指令或架構文件。",
       "Verify: 用 command、browser、logs 或 screenshot 驗證，不用感覺宣告完成。",
       "Record: 把結果寫進 deployment report，包含問題、修復與下一步。"
     ],
-    acceptance: associateSpec?.acceptance ?? deploymentAcceptanceByDay[day] ?? [
+    acceptance: labSpec?.acceptance ?? deploymentAcceptanceByDay[day] ?? [
       "至少 20 分鐘以上可操作內容，不只閱讀文字。",
       "有一份可保存的文件或規格輸出。",
       "有一個明確 command 或 UI 操作可以驗證。",
