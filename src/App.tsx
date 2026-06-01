@@ -364,7 +364,12 @@ function Dashboard({ completion, avgScore, progress, openLesson, toggleOnboardin
 function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson: (day: number) => void }) {
   return (
     <section className="stack">
-      <SectionHeader title="30天課程路線圖 / 30-Day Roadmap" desc="從 Local Docker Compose 到 AWS Production Deployment。" />
+      <SectionHeader title="30天課程路線圖 / 30-Day Roadmap" desc="Day 1-5 部署落地，Day 6-15 進階 production 化，Day 16-30 深入架構與營運。" />
+      <div className="stage-band">
+        <div><strong>Day 1-5</strong><span>部署 / Deployment</span><small>每天 35-55 min，直接產出可部署 artifact。</small></div>
+        <div><strong>Day 6-15</strong><span>進階 / Advanced</span><small>每天 45-75 min，處理 ECS、RDS、CI/CD、observability。</small></div>
+        <div><strong>Day 16-30</strong><span>深入 / Deep Dive</span><small>每天 60-90 min，安全、租戶、效能、成本、DR、IaC。</small></div>
+      </div>
       <div className="roadmap-grid">
         {allLessons.map((lessonItem) => {
           const done = progress.completedDays.includes(lessonItem.day);
@@ -374,6 +379,7 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
               <span>Day {lessonItem.day}</span>
               <strong>{lessonItem.title}</strong>
               <small>{lessonItem.titleEn}</small>
+              <small>{lessonItem.duration} · {lessonItem.intensity}</small>
               <em>{lessonItem.phase}</em>
             </button>
           );
@@ -387,10 +393,35 @@ function LessonView({ lesson, completed, markComplete, setView }: { lesson: Less
   return (
     <section className="stack">
       <SectionHeader title={`Day ${lesson.day}: ${lesson.title}`} desc={lesson.titleEn} />
+      <div className="lesson-meta">
+        <span>{lesson.phase}</span>
+        <span>{lesson.intensity}</span>
+        <span>{lesson.duration}</span>
+      </div>
       <div className="grid two">
         <Panel title="Concept / 概念"><p>{lesson.summary}</p><div className="notice">Pitfall / 常見雷點：{lesson.pitfall}</div></Panel>
         <Panel title="Hands-on Lab / 實作任務"><p>{lesson.lab}</p><pre><code>{lesson.command}</code></pre></Panel>
       </div>
+      <div className="grid two">
+        <Panel title="Document Spec / 文件規格">
+          <Checklist items={lesson.documentSpec} />
+        </Panel>
+        <Panel title="Interface Guide / 介面介紹">
+          <Checklist items={lesson.interfaceGuide} />
+        </Panel>
+      </div>
+      <div className="grid two">
+        <Panel title="Learning Steps / 20+ 分鐘實作流程">
+          <Numbered items={lesson.steps} />
+        </Panel>
+        <Panel title="Acceptance Criteria / 驗收標準">
+          <Checklist items={lesson.acceptance} />
+          <div className="recommendation">{lesson.expectedOutcome}</div>
+        </Panel>
+      </div>
+      <Panel title="Current AWS References / 當前 AWS 版本與來源提醒">
+        <Checklist items={lesson.sourceNotes} />
+      </Panel>
       <Panel title="Checkpoint / 完成檢查">
         <div className="checkline">
           {completed ? <CheckCircle2 /> : <ListChecks />}
@@ -554,7 +585,23 @@ function Glossary() {
 
 function RoadmapMini({ currentDay }: { currentDay: number }) {
   const start = Math.max(0, currentDay - 2);
-  return <div className="mini-roadmap">{allLessons.slice(start, start + 5).map((lesson) => <div key={lesson.day}><span>Day {lesson.day}</span><strong>{lesson.title}</strong><small>{lesson.titleEn}</small></div>)}</div>;
+  return <div className="mini-roadmap">{allLessons.slice(start, start + 5).map((lesson) => <div key={lesson.day}><span>Day {lesson.day}</span><strong>{lesson.title}</strong><small>{lesson.titleEn} · {lesson.duration}</small></div>)}</div>;
+}
+
+function Checklist({ items }: { items: string[] }) {
+  return (
+    <ul className="detail-list">
+      {items.map((item) => <li key={item}><CheckCircle2 size={16} /> <span>{item}</span></li>)}
+    </ul>
+  );
+}
+
+function Numbered({ items }: { items: string[] }) {
+  return (
+    <ol className="numbered-list">
+      {items.map((item, index) => <li key={item}><strong>{index + 1}</strong><span>{item}</span></li>)}
+    </ol>
+  );
 }
 
 function Metric({ title, value, sub, icon }: { title: string; value: string; sub: string; icon: React.ReactNode }) {

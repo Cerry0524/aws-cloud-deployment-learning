@@ -92,6 +92,27 @@ password: password123
 6. Switch tenants from the sidebar to see tenant-scoped progress.
 7. Open `Admin` to view tenant management and member management.
 
+## Curriculum Intensity
+
+The 30-day course is split by depth:
+
+- `Day 1-5 Deployment / 部署落地`: 35-55 minutes per day, focused on shipping a working cloud deployment artifact.
+- `Day 6-15 Advanced / 進階`: 45-75 minutes per day, focused on ECS, RDS, S3, CI/CD, observability, and productionization.
+- `Day 16-30 Deep Dive / 深入`: 60-90 minutes per day, focused on security, multi-tenancy, migrations, performance, cost, DR, IaC, and final architecture defense.
+
+Every lesson includes:
+
+- `Document Spec / 文件規格`
+- `Interface Guide / 介面介紹`
+- `Learning Steps / 20+ 分鐘實作流程`
+- `Acceptance Criteria / 驗收標準`
+- `Current AWS References / 當前 AWS 版本與來源提醒`
+
+See:
+
+- [Curriculum Intensity Spec](docs/curriculum-intensity-spec.md)
+- [AWS Current Reference Notes](docs/aws-current-reference-notes.md)
+
 ## Build
 
 ```bash
