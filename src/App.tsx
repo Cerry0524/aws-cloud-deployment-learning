@@ -201,6 +201,36 @@ type StageReadiness = ReadinessScore & {
   nextDay?: number;
 };
 
+type EvidenceDay = {
+  day: number;
+  title: string;
+  stageKey: StageKey;
+  implementation: boolean;
+  verification: boolean;
+  troubleshooting: boolean;
+  score: number;
+  status: AssessmentLevel;
+  gaps: string[];
+};
+
+type SkillRadarDimension = {
+  key: string;
+  title: string;
+  days: number[];
+  score: number;
+  level: AssessmentLevel;
+  evidenceCount: number;
+  total: number;
+  nextDay?: number;
+};
+
+type ExamMappingSummary = {
+  title: string;
+  days: number[];
+  coverage: number;
+  note: string;
+};
+
 const assessmentLevelMeta: Record<AssessmentLevel, { label: string; labelEn: string; awsLevel: string; summary: string }> = {
   "not-started": {
     label: "尚無有效證據",
@@ -339,6 +369,89 @@ const estimateStageReadiness = (progress: ProgressState): StageReadiness[] => ro
     ...meta
   };
 });
+
+const buildDailyEvidenceHeatmap = (progress: ProgressState): EvidenceDay[] => allLessons.map((lesson) => {
+  const readiness = estimateLessonReadiness(lesson, progress);
+  const outputCount = (progress.mentor.outputChecklistByLesson[lesson.day] ?? []).length;
+  const completedStepCount = (progress.mentor.completedStepsByLesson[lesson.day] ?? []).length;
+  const implementation = outputCount > 0 || readiness.rubric.implementation >= 3;
+  const verification = progress.completedDays.includes(lesson.day) && readiness.rubric.verification >= 2;
+  const troubleshooting = completedStepCount >= Math.ceil(lesson.mentorScript.guidedSteps.length * 0.6) || readiness.rubric.troubleshooting >= 3;
+
+  return {
+    day: lesson.day,
+    title: lesson.title,
+    stageKey: lesson.day <= 5 ? "deployment" : lesson.day <= 15 ? "advanced" : "deep-dive",
+    implementation,
+    verification,
+    troubleshooting,
+    score: readiness.score,
+    status: readiness.level,
+    gaps: readiness.gaps
+  };
+});
+
+const skillRadarDefinitions = [
+  { key: "docker", title: "Docker / Image Packaging", days: [1, 2, 3] },
+  { key: "compute", title: "AWS Compute: EC2/ECS", days: [4, 8, 10] },
+  { key: "networking", title: "Networking / ALB / Security Group", days: [6, 9, 16] },
+  { key: "data", title: "Data Layer: RDS/S3/Redis", days: [5, 18, 19] },
+  { key: "cicd", title: "CI/CD & Rollback", days: [7, 13, 14] },
+  { key: "observability", title: "Observability", days: [15] },
+  { key: "security", title: "Security & Governance", days: [11, 16, 26] },
+  { key: "cost-dr", title: "Cost / DR / Architecture Defense", days: [23, 24, 28, 29, 30] }
+];
+
+const buildSkillRadar = (progress: ProgressState): SkillRadarDimension[] => skillRadarDefinitions.map((dimension) => {
+  const readiness = dimension.days.map((day) => estimateLessonReadiness(allLessons[day - 1], progress));
+  const score = readiness.length ? Math.round(readiness.reduce((sum, item) => sum + item.score, 0) / readiness.length) : 0;
+  const evidenceCount = dimension.days.filter((day) => {
+    const outputCount = (progress.mentor.outputChecklistByLesson[day] ?? []).length;
+    return outputCount > 0 || progress.completedDays.includes(day);
+  }).length;
+
+  return {
+    ...dimension,
+    score,
+    level: levelForScore(score),
+    evidenceCount,
+    total: dimension.days.length,
+    nextDay: dimension.days.find((day) => !progress.completedDays.includes(day))
+  };
+});
+
+const buildExamMappingSummary = (progress: ProgressState): ExamMappingSummary[] => {
+  const evidenceDays = new Set(progress.completedDays);
+  return [
+    {
+      title: "CloudOps Engineer Associate (SOA-C03)",
+      days: [6, 8, 9, 10, 14, 15, 22, 24, 25],
+      coverage: 0,
+      note: "運維、監控、部署、擴展與故障排除。"
+    },
+    {
+      title: "Solutions Architect Associate / SA Pro prep",
+      days: [6, 8, 9, 12, 16, 23, 24, 28, 30],
+      coverage: 0,
+      note: "安全、可靠性、效能、成本與架構取捨。"
+    },
+    {
+      title: "Developer Associate / DevOps Pro prep",
+      days: [7, 10, 11, 13, 14, 18, 25, 26],
+      coverage: 0,
+      note: "部署、CI/CD、secret、migration、release governance。"
+    },
+    {
+      title: "Security / SaaS / Portfolio Defense",
+      days: [16, 17, 19, 21, 27, 29, 30],
+      coverage: 0,
+      note: "安全審查、租戶隔離、資料一致性、作品集答辯。"
+    }
+  ].map((item) => ({
+    ...item,
+    coverage: Math.round((item.days.filter((day) => evidenceDays.has(day)).length / item.days.length) * 100)
+  }));
+};
 
 const loadStore = (): Store => {
   const raw = localStorage.getItem(storageKey);
@@ -550,7 +663,7 @@ function App() {
         {view === "scenario" && <ScenarioBuilder tenant={activeTenant} />}
         {view === "lab" && <InteractiveLab />}
         {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} openLesson={openLesson} />}
-        {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} tenant={activeTenant} />}
+        {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} tenant={activeTenant} openLesson={openLesson} />}
         {view === "glossary" && <Glossary />}
         {view === "admin" && <AdminDashboard store={store} activeTenant={activeTenant} onLogout={signOut} />}
       </main>
@@ -942,6 +1055,8 @@ function LessonView({
                     {mentorScript.guidedSteps.map((step) => <li key={step.id}><CheckCircle2 size={16} /> <span>{step.title}：{step.commonMistake}</span></li>)}
                   </ul>
                 </Panel>
+
+                {lesson.day === 30 && <CapstoneDefensePanel progress={progress} />}
 
                 <Panel title="Checkpoint / 完成檢查">
                   <div className="checkline">
@@ -2688,8 +2803,136 @@ function StageAssessmentCard({ stage }: { stage: StageReadiness }) {
   );
 }
 
-function ProgressView({ completion, avgScore, progress, tenant }: { completion: number; avgScore: number; progress: ProgressState; tenant: Tenant }) {
+function EvidenceHeatmap({ days, openLesson }: { days: EvidenceDay[]; openLesson: (day: number) => void }) {
+  const stageLabels: Record<StageKey, string> = {
+    deployment: "Deployment",
+    advanced: "Advanced",
+    "deep-dive": "Deep Dive"
+  };
+
+  return (
+    <div className="evidence-heatmap">
+      {days.map((day) => (
+        <button key={day.day} className={`evidence-day ${day.status}`} onClick={() => openLesson(day.day)} title={`Day ${day.day}: ${day.title}`}>
+          <strong>{day.day}</strong>
+          <span>{stageLabels[day.stageKey]}</span>
+          <div className="evidence-dots" aria-label="Evidence coverage">
+            <i className={day.implementation ? "done" : ""} />
+            <i className={day.verification ? "done" : ""} />
+            <i className={day.troubleshooting ? "done" : ""} />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SkillRadar({ dimensions, openLesson }: { dimensions: SkillRadarDimension[]; openLesson: (day: number) => void }) {
+  return (
+    <div className="skill-radar-grid">
+      {dimensions.map((dimension) => (
+        <article className={`skill-radar-card ${dimension.level}`} key={dimension.key}>
+          <div className="skill-radar-head">
+            <strong>{dimension.title}</strong>
+            <span>{dimension.score}%</span>
+          </div>
+          <div className="assessment-progress-bar">
+            <span style={{ width: `${dimension.score}%` }} />
+          </div>
+          <div className="stage-completion-row">
+            <span>{dimension.evidenceCount}/{dimension.total} days with evidence</span>
+            {dimension.nextDay ? <button className="link-button" onClick={() => openLesson(dimension.nextDay!)}>補 Day {dimension.nextDay}</button> : <span>covered</span>}
+          </div>
+          <small>來源 Day {dimension.days.join(", ")}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ExamMappingDashboard({ mappings, openLesson }: { mappings: ExamMappingSummary[]; openLesson: (day: number) => void }) {
+  return (
+    <div className="exam-mapping-grid">
+      {mappings.map((mapping) => (
+        <article className="exam-mapping-card" key={mapping.title}>
+          <div className="skill-radar-head">
+            <strong>{mapping.title}</strong>
+            <span>{mapping.coverage}%</span>
+          </div>
+          <p>{mapping.note}</p>
+          <div className="assessment-progress-bar">
+            <span style={{ width: `${mapping.coverage}%` }} />
+          </div>
+          <div className="exam-day-links">
+            {mapping.days.map((day) => <button key={`${mapping.title}-${day}`} onClick={() => openLesson(day)}>Day {day}</button>)}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function CapstoneDefensePanel({ progress }: { progress: ProgressState }) {
+  const day30 = allLessons.find((lesson) => lesson.day === 30)!;
+  const readiness = estimateLessonReadiness(day30, progress);
+  const portfolioDays = [28, 29, 30];
+  const covered = portfolioDays.filter((day) => progress.completedDays.includes(day)).length;
+  const qnaItems = [
+    "Docker Compose 如何拆到 AWS？",
+    "stateless / stateful 邊界在哪？",
+    "rollback、DR、RPO/RTO 如何說明？",
+    "security group、secrets、tenant isolation 如何防守？",
+    "成本最大來源與 accepted risks 是什麼？"
+  ];
+
+  return (
+    <Panel title="Capstone Defense Panel / Day 30 答辯面板">
+      <div className="capstone-grid">
+        <div className={`readiness-card ${readiness.level}`}>
+          <div className="readiness-score">
+            <strong>{readiness.score}</strong>
+            <span>/100</span>
+          </div>
+          <div className="readiness-copy">
+            <div className="readiness-title">
+              <span>{readiness.label}</span>
+              <small>{readiness.labelEn} · {readiness.awsLevel}</small>
+            </div>
+            <p>Portfolio evidence coverage: {covered}/3 key days covered.</p>
+          </div>
+        </div>
+        <div>
+          <strong>Final report package</strong>
+          <Checklist items={["deployment report", "architecture diagram", "cost estimate", "20-minute defense script", "Q&A bank", "final readiness rubric"]} />
+        </div>
+        <div>
+          <strong>Defense Q&A bank</strong>
+          <Checklist items={qnaItems} />
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function ProgressView({
+  completion,
+  avgScore,
+  progress,
+  tenant,
+  openLesson
+}: {
+  completion: number;
+  avgScore: number;
+  progress: ProgressState;
+  tenant: Tenant;
+  openLesson: (day: number) => void;
+}) {
   const stageReadiness = estimateStageReadiness(progress);
+  const evidenceDays = buildDailyEvidenceHeatmap(progress);
+  const skillRadar = buildSkillRadar(progress);
+  const examMappings = buildExamMappingSummary(progress);
+  const currentOverallLevel = levelForScore(Math.round(stageReadiness.reduce((sum, stage) => sum + stage.score, 0) / stageReadiness.length));
+  const currentOverallMeta = assessmentLevelMeta[currentOverallLevel];
 
   return (
     <section className="stack">
@@ -2698,13 +2941,29 @@ function ProgressView({ completion, avgScore, progress, tenant }: { completion: 
         <Metric title="Completed Days" value={`${progress.completedDays.length}/30`} sub={`${completion}% complete`} icon={<CalendarDays />} />
         <Metric title="Average Score" value={`${avgScore}%`} sub="Quiz accuracy" icon={<Target />} />
         <Metric title="Current Day" value={`Day ${progress.currentDay}`} sub="Next lesson" icon={<BookOpen />} />
-        <Metric title="Onboarding" value={`${progress.onboardingDone.length}/5`} sub="Start from zero" icon={<Gauge />} />
+        <Metric title="AWS Level" value={currentOverallMeta.labelEn} sub={currentOverallMeta.awsLevel} icon={<Gauge />} />
       </div>
       <Panel title="Stage Assessment Summary / 階段能力評估">
         <div className="assessment-stage-grid">
           {stageReadiness.map((stage) => <StageAssessmentCard key={stage.key} stage={stage} />)}
         </div>
       </Panel>
+      <Panel title="Daily Evidence Heatmap / 每日證據熱區">
+        <div className="heatmap-legend">
+          <span><i /> Implementation</span>
+          <span><i /> Verification</span>
+          <span><i /> Troubleshooting</span>
+          <small>點擊 day 回到課程補 artifact、驗證或排錯證據。</small>
+        </div>
+        <EvidenceHeatmap days={evidenceDays} openLesson={openLesson} />
+      </Panel>
+      <Panel title="Skill Radar / 能力雷達">
+        <SkillRadar dimensions={skillRadar} openLesson={openLesson} />
+      </Panel>
+      <Panel title="Exam Mapping / 認證能力對照">
+        <ExamMappingDashboard mappings={examMappings} openLesson={openLesson} />
+      </Panel>
+      <CapstoneDefensePanel progress={progress} />
       <Panel title="Tenant Progress Isolation / 多租戶進度隔離">
         <p>目前進度屬於 <strong>{tenant.name}</strong>。不同 tenant 有不同 completed days、quiz scores、onboarding steps。</p>
       </Panel>
