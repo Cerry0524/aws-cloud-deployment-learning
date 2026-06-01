@@ -72,6 +72,28 @@ type MentorProgress = {
 
 type MentorProgressUpdate = MentorProgress | ((current: MentorProgress) => MentorProgress);
 type LessonTab = "overview" | "lab" | "deliverables" | "references";
+type AssessmentLevel = "not-started" | "aware" | "practiced" | "production-ready" | "defense-ready";
+type RubricScore = 0 | 1 | 2 | 3 | 4;
+
+type LessonAssessment = {
+  day: number;
+  concept: RubricScore;
+  implementation: RubricScore;
+  verification: RubricScore;
+  troubleshooting: RubricScore;
+  communication: RubricScore;
+  evidenceNotes: string;
+  artifactRefs: string[];
+  reviewedAt?: string;
+  reviewer?: "self" | "mentor" | "admin";
+};
+
+type StageAssessment = {
+  stageKey: string;
+  capstoneScore?: number;
+  capstoneNotes?: string;
+  levelOverride?: AssessmentLevel;
+};
 
 type ProgressState = {
   completedDays: number[];
@@ -79,6 +101,8 @@ type ProgressState = {
   currentDay: number;
   onboardingDone: string[];
   mentor: MentorProgress;
+  assessmentsByDay: Record<number, LessonAssessment>;
+  stageAssessments: Record<string, StageAssessment>;
 };
 
 type StoredProgressState = Partial<Omit<ProgressState, "mentor">> & {
@@ -107,7 +131,9 @@ const createEmptyProgress = (): ProgressState => ({
   quizScores: [],
   currentDay: 1,
   onboardingDone: [],
-  mentor: createEmptyMentorProgress()
+  mentor: createEmptyMentorProgress(),
+  assessmentsByDay: {},
+  stageAssessments: {}
 });
 
 const seededProgress: ProgressState = {
@@ -115,7 +141,9 @@ const seededProgress: ProgressState = {
   quizScores: [80, 90, 76],
   currentDay: 8,
   onboardingDone: ["repo-audit", "local-run"],
-  mentor: createEmptyMentorProgress()
+  mentor: createEmptyMentorProgress(),
+  assessmentsByDay: {},
+  stageAssessments: {}
 };
 
 const emptyProgress = createEmptyProgress();
@@ -143,7 +171,169 @@ const normalizeProgress = (progress?: StoredProgressState): ProgressState => ({
   quizScores: progress?.quizScores ?? [],
   currentDay: progress?.currentDay ?? 1,
   onboardingDone: progress?.onboardingDone ?? [],
-  mentor: normalizeMentorProgress(progress?.mentor)
+  mentor: normalizeMentorProgress(progress?.mentor),
+  assessmentsByDay: progress?.assessmentsByDay ?? {},
+  stageAssessments: progress?.stageAssessments ?? {}
+});
+
+type ReadinessScore = {
+  score: number;
+  level: AssessmentLevel;
+  label: string;
+  labelEn: string;
+  awsLevel: string;
+  summary: string;
+  gaps: string[];
+  rubric: Record<"concept" | "implementation" | "verification" | "troubleshooting" | "communication", RubricScore>;
+};
+
+type StageReadiness = ReadinessScore & {
+  key: string;
+  title: string;
+  titleEn: string;
+  range: string;
+  completedDays: number;
+  totalDays: number;
+  nextDay?: number;
+};
+
+const assessmentLevelMeta: Record<AssessmentLevel, { label: string; labelEn: string; awsLevel: string; summary: string }> = {
+  "not-started": {
+    label: "尚無有效證據",
+    labelEn: "Not Started",
+    awsLevel: "Pre-Foundational",
+    summary: "還沒有足夠 artifact 證明能力。"
+  },
+  aware: {
+    label: "理解概念",
+    labelEn: "Aware",
+    awsLevel: "Foundational",
+    summary: "看懂主題，但 implementation 或 verification 證據不足。"
+  },
+  practiced: {
+    label: "已實作練習",
+    labelEn: "Practiced",
+    awsLevel: "Associate entry",
+    summary: "有實作痕跡，但還需要更完整的驗證與排錯證據。"
+  },
+  "production-ready": {
+    label: "可上線交付",
+    labelEn: "Production Ready",
+    awsLevel: "Associate ready",
+    summary: "能交付 artifact、驗證結果，並保留 rollback/recovery 思路。"
+  },
+  "defense-ready": {
+    label: "可答辯",
+    labelEn: "Defense Ready",
+    awsLevel: "Professional prep",
+    summary: "能以架構審查語言說明 trade-off、風險與替代方案。"
+  }
+};
+
+const levelForScore = (score: number): AssessmentLevel => {
+  if (score >= 90) return "defense-ready";
+  if (score >= 75) return "production-ready";
+  if (score >= 60) return "practiced";
+  if (score >= 40) return "aware";
+  return "not-started";
+};
+
+const ratioScore = (value: number): RubricScore => {
+  if (value >= 0.9) return 4;
+  if (value >= 0.65) return 3;
+  if (value >= 0.35) return 2;
+  if (value > 0) return 1;
+  return 0;
+};
+
+const weightedRubricScore = (rubric: ReadinessScore["rubric"]) => Math.round(
+  (rubric.concept / 4) * 20
+  + (rubric.implementation / 4) * 25
+  + (rubric.verification / 4) * 25
+  + (rubric.troubleshooting / 4) * 15
+  + (rubric.communication / 4) * 15
+);
+
+const buildReadinessScore = (rubric: ReadinessScore["rubric"], gaps: string[]): ReadinessScore => {
+  const score = weightedRubricScore(rubric);
+  const level = levelForScore(score);
+  const meta = assessmentLevelMeta[level];
+  return {
+    score,
+    level,
+    gaps,
+    rubric,
+    ...meta
+  };
+};
+
+const estimateLessonReadiness = (lesson: Lesson, progress: ProgressState): ReadinessScore => {
+  const completed = progress.completedDays.includes(lesson.day);
+  const stepIds = progress.mentor.completedStepsByLesson[lesson.day] ?? [];
+  const outputIds = progress.mentor.outputChecklistByLesson[lesson.day] ?? [];
+  const stepRatio = lesson.mentorScript.guidedSteps.length ? stepIds.length / lesson.mentorScript.guidedSteps.length : 0;
+  const outputRatio = lesson.mentorScript.deliverables.length ? outputIds.length / lesson.mentorScript.deliverables.length : 0;
+  const hasQuizSignal = progress.quizScores.length > 0 && Math.round(progress.quizScores.reduce((sum, score) => sum + score, 0) / progress.quizScores.length) >= 75;
+
+  const rubric = {
+    concept: (completed ? 3 : ratioScore(stepRatio)) as RubricScore,
+    implementation: ratioScore(Math.max(outputRatio, stepRatio * 0.75)),
+    verification: ratioScore(completed && outputRatio > 0 ? outputRatio : outputRatio * 0.65),
+    troubleshooting: ratioScore(stepRatio),
+    communication: ratioScore((outputRatio + (hasQuizSignal ? 0.2 : 0)) / 1.2)
+  };
+
+  const gaps = [
+    rubric.implementation < 3 ? "缺少可保存的實作 artifact，例如 diagram、runbook、config checklist。" : "",
+    rubric.verification < 3 ? "缺少 verification evidence，例如 health check、CLI output、log 或 screenshot。" : "",
+    rubric.troubleshooting < 3 ? "缺少 troubleshooting 證據：錯誤偵測、修復方式、rollback/recovery note。" : "",
+    rubric.communication < 3 ? "缺少能向主管或面試官說明取捨的 architecture note。" : ""
+  ].filter(Boolean);
+
+  return buildReadinessScore(rubric, gaps);
+};
+
+const estimateStageReadiness = (progress: ProgressState): StageReadiness[] => roadmapSections.map((section) => {
+  const lessons = allLessons.filter((lesson) => lesson.day >= section.startDay && lesson.day <= section.endDay);
+  const completedDays = lessons.filter((lesson) => progress.completedDays.includes(lesson.day)).length;
+  const lessonReadiness = lessons.map((lesson) => estimateLessonReadiness(lesson, progress));
+  const avgLessonScore = lessonReadiness.length
+    ? Math.round(lessonReadiness.reduce((sum, item) => sum + item.score, 0) / lessonReadiness.length)
+    : 0;
+  const quizAverage = progress.quizScores.length
+    ? Math.round(progress.quizScores.reduce((sum, score) => sum + score, 0) / progress.quizScores.length)
+    : 0;
+  const evidenceCoverage = lessons.length
+    ? Math.round((lessons.filter((lesson) => (progress.mentor.outputChecklistByLesson[lesson.day] ?? []).length > 0).length / lessons.length) * 100)
+    : 0;
+  const capstoneScore = progress.stageAssessments[section.key]?.capstoneScore ?? 0;
+  const score = Math.round((avgLessonScore * 0.6) + (capstoneScore * 0.25) + (quizAverage * 0.1) + (evidenceCoverage * 0.05));
+  const weakRubric = lessonReadiness.flatMap((item) => item.gaps);
+  const uniqueGaps = Array.from(new Set(weakRubric)).slice(0, 3);
+  const nextDay = lessons.find((lesson) => !progress.completedDays.includes(lesson.day))?.day;
+  const level = progress.stageAssessments[section.key]?.levelOverride ?? levelForScore(score);
+  const meta = assessmentLevelMeta[level];
+
+  return {
+    key: section.key,
+    title: section.title,
+    titleEn: section.titleEn,
+    range: `Day ${section.startDay}-${section.endDay}`,
+    completedDays,
+    totalDays: lessons.length,
+    nextDay,
+    score,
+    level,
+    gaps: uniqueGaps.length ? uniqueGaps : ["目前階段已有基本證據，下一步補 capstone review。"],
+    rubric: {
+      concept: ratioScore(completedDays / Math.max(1, lessons.length)),
+      implementation: ratioScore(evidenceCoverage / 100),
+      verification: ratioScore(avgLessonScore / 100),
+      troubleshooting: ratioScore(avgLessonScore >= 60 ? 0.6 : 0.25),
+      communication: ratioScore(Math.max(capstoneScore, quizAverage) / 100)
+    },
+    ...meta
+  };
 });
 
 const loadStore = (): Store => {
@@ -349,7 +539,7 @@ function App() {
 
         {view === "dashboard" && <Dashboard completion={completion} avgScore={avgScore} progress={progress} openLesson={openLesson} toggleOnboarding={toggleOnboarding} />}
         {view === "roadmap" && <Roadmap progress={progress} openLesson={openLesson} />}
-        {view === "lesson" && <LessonView lesson={lesson} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
+        {view === "lesson" && <LessonView lesson={lesson} progress={progress} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
         {view === "scenario" && <ScenarioBuilder tenant={activeTenant} />}
         {view === "lab" && <InteractiveLab />}
         {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} />}
@@ -563,6 +753,7 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
 
 function LessonView({
   lesson,
+  progress,
   completed,
   markComplete,
   setView,
@@ -570,6 +761,7 @@ function LessonView({
   updateMentorProgress
 }: {
   lesson: Lesson;
+  progress: ProgressState;
   completed: boolean;
   markComplete: () => void;
   setView: (view: View) => void;
@@ -585,6 +777,7 @@ function LessonView({
   const completedStepIds = mentorProgress.completedStepsByLesson[lesson.day] ?? [];
   const currentStepCompleted = currentStep ? completedStepIds.includes(currentStep.id) : false;
   const commandLines = lesson.command.split("\n").filter(Boolean);
+  const readiness = estimateLessonReadiness(lesson, progress);
   const [activeLessonTab, setActiveLessonTab] = useState<LessonTab>("lab");
 
   useEffect(() => {
@@ -719,6 +912,8 @@ function LessonView({
 
             {activeLessonTab === "deliverables" && (
               <div className="lesson-tab-content">
+                <ReadinessEstimate readiness={readiness} title="Readiness Estimate / 本日能力預估" />
+
                 <Panel title="關鍵交付 / Deliverables & 檢核">
                   <div className="lesson-support-grid">
                     <div>
@@ -2223,7 +2418,82 @@ function QuizView({ answers, setAnswers, result, submitQuiz }: { answers: Record
   );
 }
 
+function ReadinessEstimate({ readiness, title }: { readiness: ReadinessScore; title: string }) {
+  const rubricRows = [
+    ["Concept", "理解部署問題", readiness.rubric.concept],
+    ["Implementation", "產出實作 artifact", readiness.rubric.implementation],
+    ["Verification", "留下驗證證據", readiness.rubric.verification],
+    ["Troubleshooting", "能排錯與回復", readiness.rubric.troubleshooting],
+    ["Communication", "能說明架構取捨", readiness.rubric.communication]
+  ] as const;
+
+  return (
+    <Panel title={title}>
+      <div className={`readiness-card ${readiness.level}`}>
+        <div className="readiness-score">
+          <strong>{readiness.score}</strong>
+          <span>/100</span>
+        </div>
+        <div className="readiness-copy">
+          <div className="readiness-title">
+            <span>{readiness.label}</span>
+            <small>{readiness.labelEn} · {readiness.awsLevel}</small>
+          </div>
+          <p>{readiness.summary}</p>
+        </div>
+      </div>
+      <div className="rubric-grid">
+        {rubricRows.map(([name, desc, value]) => (
+          <div className="rubric-item" key={name}>
+            <div>
+              <strong>{name}</strong>
+              <small>{desc}</small>
+            </div>
+            <span>{value}/4</span>
+          </div>
+        ))}
+      </div>
+      <div className="evidence-gaps">
+        <strong>Evidence gaps / 待補證據</strong>
+        <ul>
+          {readiness.gaps.map((gap) => <li key={gap}>{gap}</li>)}
+        </ul>
+      </div>
+    </Panel>
+  );
+}
+
+function StageAssessmentCard({ stage }: { stage: StageReadiness }) {
+  return (
+    <article className={`stage-assessment-card ${stage.level}`}>
+      <div className="stage-assessment-head">
+        <span>{stage.range}</span>
+        <strong>{stage.score}%</strong>
+      </div>
+      <h3>{stage.title}</h3>
+      <p>{stage.titleEn}</p>
+      <div className="assessment-progress-bar">
+        <span style={{ width: `${stage.score}%` }} />
+      </div>
+      <div className="stage-level-row">
+        <ShieldCheck size={16} />
+        <span>{stage.label}</span>
+        <small>{stage.awsLevel}</small>
+      </div>
+      <div className="stage-completion-row">
+        <span>{stage.completedDays}/{stage.totalDays} 天完成</span>
+        <span>{stage.nextDay ? `下一步 Day ${stage.nextDay}` : "進入 capstone review"}</span>
+      </div>
+      <ul className="stage-gap-list">
+        {stage.gaps.map((gap) => <li key={gap}>{gap}</li>)}
+      </ul>
+    </article>
+  );
+}
+
 function ProgressView({ completion, avgScore, progress, tenant }: { completion: number; avgScore: number; progress: ProgressState; tenant: Tenant }) {
+  const stageReadiness = estimateStageReadiness(progress);
+
   return (
     <section className="stack">
       <SectionHeader title="學習歷程 / Learning Progress" desc={`${tenant.name} tenant-scoped progress。切換租戶會看到不同進度。`} />
@@ -2233,6 +2503,11 @@ function ProgressView({ completion, avgScore, progress, tenant }: { completion: 
         <Metric title="Current Day" value={`Day ${progress.currentDay}`} sub="Next lesson" icon={<BookOpen />} />
         <Metric title="Onboarding" value={`${progress.onboardingDone.length}/5`} sub="Start from zero" icon={<Gauge />} />
       </div>
+      <Panel title="Stage Assessment Summary / 階段能力評估">
+        <div className="assessment-stage-grid">
+          {stageReadiness.map((stage) => <StageAssessmentCard key={stage.key} stage={stage} />)}
+        </div>
+      </Panel>
       <Panel title="Tenant Progress Isolation / 多租戶進度隔離">
         <p>目前進度屬於 <strong>{tenant.name}</strong>。不同 tenant 有不同 completed days、quiz scores、onboarding steps。</p>
       </Panel>
