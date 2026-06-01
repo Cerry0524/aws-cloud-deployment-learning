@@ -113,6 +113,16 @@ type StoredProgressState = Partial<Omit<ProgressState, "mentor">> & {
   mentor?: Partial<MentorProgress>;
 };
 
+type GlossaryItem = {
+  term: string;
+  zh: string;
+  category: string;
+  descZh: string;
+  descEn: string;
+};
+
+const APP_RELEASE_TAG = "Release v2.3";
+
 type Store = {
   users: UserAccount[];
   tenants: Tenant[];
@@ -609,7 +619,7 @@ function App() {
   const navItems = [
     ["dashboard", LayoutDashboard, "從0開始", "Start from Zero"],
     ["roadmap", CalendarDays, "30天路線圖", "30-Day Roadmap"],
-    ["scenario", Cloud, "情境輸入", "Scenario Builder"],
+    ["scenario", Cloud, "情境落地", "Scenario Onboarding"],
     ["lab", TerminalSquare, "互動模式", "Interactive Lab"],
     ["quiz", ClipboardCheck, "測驗模式", "Quiz Mode"],
     ["progress", Gauge, "學習歷程", "Learning Progress"],
@@ -620,14 +630,15 @@ function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><Cloud size={22} /></div>
-          <div>
-            <strong>CloudLearn</strong>
-            <span>AWS Docker Lab</span>
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark"><Cloud size={22} /></div>
+            <div>
+              <strong>CloudLearn</strong>
+              <span>AWS Docker Lab</span>
+            </div>
+            <span className="app-release-tag">{APP_RELEASE_TAG}</span>
           </div>
-        </div>
         <div className="mobile-shell-actions" aria-label="Mobile tenant and account controls">
           <label className="mobile-tenant-select">
             <span>租戶</span>
@@ -676,7 +687,7 @@ function App() {
         {view === "roadmap" && <Roadmap progress={progress} openLesson={openLesson} />}
         {view === "lesson" && <LessonView lesson={lesson} progress={progress} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
         {view === "scenario" && <ScenarioBuilder tenant={activeTenant} />}
-        {view === "lab" && <InteractiveLab />}
+        {view === "lab" && <InteractiveLab openLesson={openLesson} />}
         {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} openLesson={openLesson} />}
         {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} tenant={activeTenant} openLesson={openLesson} />}
         {view === "glossary" && <Glossary />}
@@ -1057,6 +1068,7 @@ function LessonView({
 
             {activeLessonTab === "lab" && (
               <div className="lesson-tab-content">
+                <TicketFactoryDecisionLab lesson={lesson} />
                 {currentStep && (
                   <ActiveStepPanel
                     lesson={lesson}
@@ -2309,33 +2321,413 @@ function AwsServiceBadge({ type }: { type: string }) {
   return <span className={`aws-service-badge ${type}`} aria-hidden="true">{icon}</span>;
 }
 
-function DeploymentInventoryTable() {
-  const rows = [
-    ["frontend (React)", "build output、public URL、API base URL", "S3 + CloudFront"],
-    ["api (Laravel)", "service port、healthcheck、env", "ECS Fargate"],
-    ["database", "資料持久化、backup、連線來源", "RDS PostgreSQL"],
-    ["redis", "cache / queue / session 用途", "ElastiCache Redis"],
-    ["uploads", "檔案大小、存取權限、生命週期", "S3"]
+function buildTicketFactoryDecisionItems(lesson: Lesson) {
+  const genericServiceOption = lesson.phase === "Deployment"
+    ? "先保留 Docker Compose 可回滾路徑"
+    : lesson.phase === "Advanced"
+      ? "拆成可維運的 AWS service boundary"
+      : "補上可審查的治理與營運證據";
+
+  const buildOptions = (recommended: string, fallback: string[]) => {
+    const source = [recommended, ...fallback];
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const option of source) {
+      if (!option) continue;
+      if (seen.has(option)) continue;
+      seen.add(option);
+      unique.push(option);
+    }
+    return unique.slice(0, 3);
+  };
+
+  const dayGoal = lesson.mentorScript?.todayGoal ?? lesson.summary;
+  const deliverable = lesson.mentorScript?.deliverables?.[0] ?? `${lesson.titleEn} artifact`;
+  const awsAbility = lesson.examMapping?.[0] ?? genericServiceOption;
+
+  const stageDefaults: Record<string, Array<{ id: string; question: string; context: string; recommended: string; options: string[]; feedback: string }>> = {
+    advanced: [
+      {
+        id: `day${lesson.day}-advanced-boundary`,
+        question: `Day ${lesson.day} 要優先確認的 production boundary 是什麼？`,
+        context: lesson.mentorScript.scenario,
+        recommended: lesson.documentSpec[0] ?? "先定義 web / api / data / worker 的邊界分工",
+        options: [
+          lesson.documentSpec[0] ?? "先定義 web / api / data / worker 的邊界分工",
+          "只做外觀，暫時不切 service boundary",
+          "先把所有設定都寫進 image 內"
+        ],
+        feedback: "你必須用 TicketFactory 的架構切割來定義哪一段交付可維運，否則後續調參會彼此干擾。"
+      },
+      {
+        id: `day${lesson.day}-advanced-aws`,
+        question: `Day ${lesson.day} 對 TicketFactory 最需要補上的 AWS 能力是？`,
+        context: lesson.mentorScript.todayGoal,
+        recommended: awsAbility,
+        options: buildOptions(awsAbility, ["先看 UI 色彩再談 API", "只增加 Domain，不補運維證據", "全部依賴 dev compose 不變" ]),
+        feedback: "今天不求一次到位，但每一個能力選擇都要能回答：今天解決哪個缺口、下一天怎麼接。"
+      },
+      {
+        id: `day${lesson.day}-advanced-artifact`,
+        question: `Day ${lesson.day} 回到開發機時，最要補交哪一份 artifact？`,
+        context: "手機讀完可先完成決策，回到作業環境後補上驗證與指令證據。",
+        recommended: deliverable,
+        options: buildOptions(deliverable, ["只截圖一張頁面", "只記錄錯誤訊息", "先關掉再繼續下一天"]),
+        feedback: "每一天都要有可交付輸出，這是你後續在手機之外仍能持續推進的唯一保障。"
+      }
+    ],
+    deep: [
+      {
+        id: `day${lesson.day}-deep-risk`,
+        question: `Day ${lesson.day} 最容易被忽略的營運風險是什麼？`,
+        context: lesson.mentorScript.scenario,
+        recommended: lesson.pitfall ?? "先做可回滾、可追蹤、可稽核的驗證流程",
+        options: buildOptions(
+          lesson.pitfall ?? "先做可回滾、可追蹤、可稽核的驗證流程",
+          [
+            "只追求節點多，不補觀測",
+            "先壓下線上流量再處理資安",
+            "一次改完再一次測試"
+          ]
+        ),
+        feedback: "深度營運比工具更重：要把風險、影響面、回復路徑都寫進你的 decision record。"
+      },
+      {
+        id: `day${lesson.day}-deep-goal`,
+        question: `Day ${lesson.day} 的今天目標應該如何向團隊解釋？`,
+        context: lesson.mentorScript.todayGoal,
+        recommended: dayGoal,
+        options: buildOptions(dayGoal, ["我今天做了新 UI", "我今天只把頁面跑起來了", "我先不補文檔，等最後再補"]),
+        feedback: "要有一句可以被考官追問的目標敘述：今天在 TicketFactory 情境下，解決的是什麼問題。"
+      },
+      {
+        id: `day${lesson.day}-deep-artifact`,
+        question: `Day ${lesson.day} 最適合提交的證據形式是？`,
+        context: "在手機上你先把答案定義好，回到實機補上截圖與指令。",
+        recommended: deliverable,
+        options: buildOptions(deliverable, ["只有 slack 分享", "只放一句我懂了", "只貼 Docker Compose 指令"]),
+        feedback: "交付形式要可被檢查：指令、設定、影像或表格都要能指向今天決策的依據。"
+      }
+    ]
+  };
+
+  const daySpecific: Record<number, Array<{ id: string; question: string; context: string; recommended: string; options: string[]; feedback: string }>> = {
+    1: [
+      {
+        id: "day1-service-boundary",
+        question: "手機上沒有 docker-compose 可以看，第一步應先判斷什麼？",
+        context: "TicketFactory preset：React frontend、Laravel API、PostgreSQL、Redis、uploads/storage。",
+        recommended: "先把服務分成 stateless / stateful",
+        options: ["先把服務分成 stateless / stateful", "先買 domain", "先設定 CloudFront cache"],
+        feedback: "Day1 重點是盤點責任邊界，不是馬上部署。先知道哪些能重建、哪些需要保留。"
+      },
+      {
+        id: "day1-stateful",
+        question: "TicketFactory 哪些項目最需要先標成 stateful？",
+        context: "PostgreSQL 有交易資料，uploads 有使用者檔案，Redis 多半是 cache/session/queue。",
+        recommended: "PostgreSQL + uploads/storage",
+        options: ["PostgreSQL + uploads/storage", "React build output", "Nginx config only"],
+        feedback: "資料庫與上傳檔是最容易造成部署損失的資源，Day5 才會正式抽離到 RDS/S3。"
+      },
+      {
+        id: "day1-artifact",
+        question: "今天最該留下的 artifact 是什麼？",
+        context: "後面 EC2、ECS、RDS、S3 都會沿用這份盤點。",
+        recommended: "services-to-AWS mapping table",
+        options: ["services-to-AWS mapping table", "只截圖首頁", "只記錄 AWS 名詞"],
+        feedback: "這份 mapping table 是後面每一天的依據，手機操作也能先完成概念盤點。"
+      }
+    ],
+    2: [
+      {
+        id: "day2-local-proof",
+        question: "沒有開發機時，Day2 要先理解哪一種驗證證據？",
+        context: "TicketFactory 需要確認 frontend、api、database、redis 能在 production-like 條件下互通。",
+        recommended: "healthcheck + service connectivity checklist",
+        options: ["healthcheck + service connectivity checklist", "只看首頁有沒有開", "先改 UI 顏色"],
+        feedback: "Day2 是建立可重現證據，重點是用 healthcheck、logs、連線檢查證明不是感覺可跑。"
+      },
+      {
+        id: "day2-port-boundary",
+        question: "手機閱讀時，哪個 port 概念最重要？",
+        context: "React dev port、Laravel API port、PostgreSQL 5432、Redis 6379 不應全部暴露到外部。",
+        recommended: "分清 public ingress 與 internal service port",
+        options: ["分清 public ingress 與 internal service port", "所有 port 都開 0.0.0.0", "只要 localhost 能連就好"],
+        feedback: "上 AWS 前要先理解哪些流量該從 Internet 進來，哪些只能在內網互通。"
+      }
+    ],
+    3: [
+      {
+        id: "day3-image",
+        question: "TicketFactory 從開發到部署，image 最大差異是什麼？",
+        context: "開發常用 bind mount；production image 應該 COPY source 並固定 dependency。",
+        recommended: "移除 dev bind mount，產出可版本化 image",
+        options: ["移除 dev bind mount，產出可版本化 image", "把整台電腦 rsync 到 EC2", "只改 docker-compose service 名稱"],
+        feedback: "可部署 image 才能 rollback、重建與交給 CI/CD。"
+      },
+      {
+        id: "day3-frontend",
+        question: "React frontend 在 production packaging 後應產出什麼？",
+        context: "TicketFactory frontend 最後會變成靜態 dist assets。",
+        recommended: "npm build 後的 dist artifact",
+        options: ["npm build 後的 dist artifact", "Vite dev server port", "PostgreSQL data volume"],
+        feedback: "前端部署不是帶著 dev server 上線，而是將 build output 交給 S3/CloudFront 或 Nginx。"
+      }
+    ],
+    4: [
+      {
+        id: "day4-ec2-first",
+        question: "Day4 EC2 first deploy 的合理目標是什麼？",
+        context: "TicketFactory 先把整條 stack 放到 EC2 + Docker Compose，建立最小可用路徑。",
+        recommended: "先做到可上線、可驗證、可 rollback",
+        options: ["先做到可上線、可驗證、可 rollback", "一次拆成完整微服務", "先做成本最佳化"],
+        feedback: "Day4 不是最終架構，是先建立第一條可復原的上線路徑。"
+      },
+      {
+        id: "day4-security-group",
+        question: "EC2 第一版最該小心哪個邊界？",
+        context: "HTTP/HTTPS 可以公開，但 SSH、DB、Redis 不應隨便開給全世界。",
+        recommended: "Security Group ingress 最小化",
+        options: ["Security Group ingress 最小化", "所有 port 開 0.0.0.0/0", "只看 instance type"],
+        feedback: "手機上先理解這個決策，實作時才不會把 DB/Redis 暴露出去。"
+      }
+    ],
+    5: [
+      {
+        id: "day5-managed-state",
+        question: "Day5 開始從 EC2 抽離，優先抽哪類資源？",
+        context: "TicketFactory 的 PostgreSQL、uploads、Redis 都是 stateful 或 shared dependency。",
+        recommended: "DB、uploads、cache/session",
+        options: ["DB、uploads、cache/session", "React button component", "README title"],
+        feedback: "抽離 stateful service 才能讓 EC2/ECS compute 變得可替換。"
+      },
+      {
+        id: "day5-secrets",
+        question: "抽離 managed service 後，設定值應怎麼處理？",
+        context: "DB host/password、S3 bucket、Redis endpoint 不能寫死在 image。",
+        recommended: "用 env / SSM / Secrets Manager 管理",
+        options: ["用 env / SSM / Secrets Manager 管理", "直接 commit .env", "寫死在 Dockerfile"],
+        feedback: "設定與 secret 必須離開 image，後面 CI/CD 與安全治理才接得上。"
+      }
+    ]
+  };
+
+  if (lesson.phase === "Advanced") {
+    return stageDefaults.advanced;
+  }
+
+  if (lesson.phase === "Deep Dive") {
+    return stageDefaults.deep;
+  }
+
+  return daySpecific[lesson.day] ?? [
+    {
+      id: `day${lesson.day}-focus`,
+      question: `Day ${lesson.day} 在 TicketFactory 情境下，第一個判斷點是什麼？`,
+      context: lesson.mentorScript.scenario,
+      recommended: lesson.mentorScript.guidedSteps[0]?.title ?? genericServiceOption,
+      options: buildOptions(lesson.mentorScript.guidedSteps[0]?.title ?? genericServiceOption, ["先跳過驗證直接部署", "只閱讀 AWS 名詞不回到專案"]),
+      feedback: "每天都先回到 TicketFactory 現況，確認今天解決哪一個部署痛點。"
+    },
+    {
+      id: `day${lesson.day}-aws-mapping`,
+      question: "這一天最該對應到哪一類 AWS / production 能力？",
+      context: lesson.mentorScript.todayGoal,
+      recommended: lesson.examMapping[0] ?? genericServiceOption,
+      options: buildOptions(lesson.examMapping[0] ?? genericServiceOption, ["只保留本機 Docker Compose", "先做無關 UI 調整"]),
+      feedback: "選項不是要背服務名，而是確認今天的 AWS 能力如何推進 TicketFactory 上線。"
+    },
+    {
+      id: `day${lesson.day}-artifact`,
+      question: "手機閱讀後，今天至少要留下哪種可交付結果？",
+      context: "你稍後在開發機上實作時，會拿這個答案回去補 command、截圖或設定。",
+      recommended: lesson.mentorScript.deliverables[0] ?? `${lesson.titleEn} artifact`,
+      options: [lesson.mentorScript.deliverables[0] ?? `${lesson.titleEn} artifact`, "只說我懂了", "只截圖不寫驗證與 rollback"],
+      feedback: "每一天都要留下 artifact，否則手機學習和實機操作會斷線。"
+    }
   ];
+}
+
+function TicketFactoryDecisionLab({ lesson }: { lesson: Lesson }) {
+  const decisionItems = useMemo(() => buildTicketFactoryDecisionItems(lesson), [lesson]);
+  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(decisionItems.map((item) => [item.id, item.recommended])));
+
+  useEffect(() => {
+    setAnswers(Object.fromEntries(decisionItems.map((item) => [item.id, item.recommended])));
+  }, [decisionItems]);
+
+  const matchedCount = decisionItems.filter((item) => answers[item.id] === item.recommended).length;
+
+  return (
+    <Panel title="TicketFactory 互動決策 / Interactive Decisions">
+      <div className="decision-lab">
+        <div className="decision-lab-head">
+          <div>
+            <strong>用 TicketFactory preset 做選擇，不依賴手機上的作業環境</strong>
+            <p>先選出合理部署判斷，之後回到開發機再補 command、截圖與設定檔證據。</p>
+          </div>
+          <span>{matchedCount}/{decisionItems.length}</span>
+        </div>
+
+        <div className="decision-card-grid">
+          {decisionItems.map((item, index) => {
+            const selected = answers[item.id];
+            const matched = selected === item.recommended;
+            return (
+              <article className={`decision-card ${matched ? "matched" : "review"}`} key={item.id}>
+                <div className="decision-card-top">
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{item.question}</strong>
+                    <small>{item.context}</small>
+                  </div>
+                </div>
+                <div className="decision-options" role="group" aria-label={item.question}>
+                  {item.options.map((option) => (
+                    <button
+                      type="button"
+                      key={option}
+                      className={selected === option ? "active" : ""}
+                      onClick={() => setAnswers((current) => ({ ...current, [item.id]: option }))}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <div className={`decision-feedback ${matched ? "ok" : "warn"}`}>
+                  <strong>{matched ? "建議方向" : "需要回頭驗證"}</strong>
+                  <span>{matched ? item.feedback : `你選了「${selected}」，回到實機時要補證據確認它不是跳過今天主線。`}</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function DeploymentInventoryTable() {
+  const inventoryItems = [
+    {
+      id: "frontend",
+      component: "frontend (React)",
+      source: "client service / Vite build / public assets",
+      check: "build output、public URL、API base URL",
+      recommended: "S3 + CloudFront",
+      options: ["S3 + CloudFront", "EC2 Nginx", "ECS Fargate"],
+      feedback: "React build 後是靜態資產，優先放 S3 並用 CloudFront 做 CDN 與 HTTPS。"
+    },
+    {
+      id: "api",
+      component: "api (Laravel)",
+      source: "api service / PHP-FPM + Laravel / health endpoint",
+      check: "service port、healthcheck、env",
+      recommended: "ECS Fargate",
+      options: ["ECS Fargate", "EC2 Docker Compose", "Lambda"],
+      feedback: "Laravel API 是長時間運行的 web service，Production path 優先練 ECS Fargate；Day4 會先用 EC2 起跑。"
+    },
+    {
+      id: "database",
+      component: "database",
+      source: "PostgreSQL service / port 5432 / persistent data",
+      check: "資料持久化、backup、連線來源",
+      recommended: "RDS PostgreSQL",
+      options: ["RDS PostgreSQL", "EC2 local PostgreSQL", "DynamoDB"],
+      feedback: "TicketFactory 是關聯式交易資料，應先對應 RDS PostgreSQL，重點是 backup、private subnet 與連線來源。"
+    },
+    {
+      id: "redis",
+      component: "redis",
+      source: "Redis service / cache、queue、session",
+      check: "cache / queue / session 用途",
+      recommended: "ElastiCache Redis",
+      options: ["ElastiCache Redis", "RDS", "S3"],
+      feedback: "Redis 是 ephemeral state，不是主要資料庫；上雲時對應 ElastiCache，並確認 session/queue 是否可重建。"
+    },
+    {
+      id: "uploads",
+      component: "uploads",
+      source: "storage volume / uploaded files / public disk",
+      check: "檔案大小、存取權限、生命週期",
+      recommended: "S3",
+      options: ["S3", "EBS only", "RDS BLOB"],
+      feedback: "上傳檔案不應綁死在 container，本階段先把 Laravel storage/public disk 對應到 S3。"
+    }
+  ];
+  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(inventoryItems.map((item) => [item.id, item.recommended])));
+  const selectedCount = inventoryItems.filter((item) => answers[item.id]).length;
+  const recommendedCount = inventoryItems.filter((item) => answers[item.id] === item.recommended).length;
 
   return (
     <Panel title="Deployment Inventory / 部署盤點表">
+      <div className="inventory-wizard">
+        <div className="inventory-wizard-head">
+          <div>
+            <strong>TicketFactory preset 互動盤點</strong>
+            <p>手機沒有作業環境時，先用已知 TicketFactory 設定練習判斷。你選的答案會同步成下方 artifact 表格。</p>
+          </div>
+          <span>{recommendedCount}/{inventoryItems.length} 建議對位</span>
+        </div>
+
+        <div className="inventory-choice-grid">
+          {inventoryItems.map((item, index) => {
+            const selected = answers[item.id];
+            const matched = selected === item.recommended;
+            return (
+              <article className={`inventory-choice-card ${matched ? "matched" : "review"}`} key={item.id}>
+                <div className="inventory-choice-top">
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{item.component}</strong>
+                    <small>{item.source}</small>
+                  </div>
+                </div>
+                <p>{item.check}</p>
+                <div className="inventory-option-list" role="group" aria-label={`${item.component} AWS mapping options`}>
+                  {item.options.map((option) => (
+                    <button
+                      type="button"
+                      key={option}
+                      className={selected === option ? "active" : ""}
+                      onClick={() => setAnswers((current) => ({ ...current, [item.id]: option }))}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <div className={`inventory-feedback ${matched ? "ok" : "warn"}`}>
+                  <strong>{matched ? "建議對位" : "需要再確認"}</strong>
+                  <span>{matched ? item.feedback : `你選了 ${selected}，建議回頭比較它是否真的解決 ${item.check}。`}</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="inventory-table-wrap">
         <table className="inventory-table">
           <thead>
             <tr><th>Local component</th><th>要檢查什麼</th><th>AWS 方向</th><th>狀態</th></tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={row[0]}>
-                <td data-label="Local component"><strong>{row[0]}</strong><small>#{index + 1}</small></td>
-                <td data-label="要檢查什麼"><label><input type="checkbox" /> {row[1]}</label></td>
-                <td data-label="AWS 方向">{row[2]}</td>
-                <td data-label="狀態"><select defaultValue="pending"><option value="pending">待確認</option><option value="done">已確認</option></select></td>
+            {inventoryItems.map((row, index) => (
+              <tr key={row.id}>
+                <td data-label="Local component"><strong>{row.component}</strong><small>#{index + 1} · {row.source}</small></td>
+                <td data-label="要檢查什麼"><label><input type="checkbox" checked={Boolean(answers[row.id])} readOnly /> {row.check}</label></td>
+                <td data-label="AWS 方向">{answers[row.id]}</td>
+                <td data-label="狀態"><select value={answers[row.id] === row.recommended ? "done" : "pending"} onChange={(event) => {
+                  if (event.target.value === "done") setAnswers((current) => ({ ...current, [row.id]: row.recommended }));
+                }}><option value="pending">待確認</option><option value="done">已確認</option></select></td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="inventory-wizard-summary">
+        <CheckCircle2 size={16} />
+        <span>已完成 {selectedCount}/{inventoryItems.length} 個 TicketFactory component 對位；建議對位 {recommendedCount}/{inventoryItems.length}。</span>
       </div>
     </Panel>
   );
@@ -2512,40 +2904,321 @@ function RightHintRail({
 }
 
 function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
+  const presets = [
+    {
+      id: "ticketfactory",
+      name: "TicketFactory 標準版",
+      description: "Laravel + React + PostgreSQL + Redis + uploads，最接近課程主線。",
+      target: "ECS Fargate",
+      appShape: "Web + API + Worker",
+      dataShape: "Mixed state",
+      trafficShape: "Steady with bursts",
+      flags: { uploads: true, websocket: true, multiTenant: true, scheduledJobs: true }
+    },
+    {
+      id: "bootstrap",
+      name: "先上線版",
+      description: "想先用最少改動把 Docker Compose 先搬上 EC2。",
+      target: "EC2",
+      appShape: "Monolith on one host",
+      dataShape: "Strong state",
+      trafficShape: "Low steady traffic",
+      flags: { uploads: true, websocket: false, multiTenant: false, scheduledJobs: false }
+    },
+    {
+      id: "realtime",
+      name: "即時互動版",
+      description: "適合 Reverb、queue、登入態與推播一起考慮。",
+      target: "Hybrid Static + ECS",
+      appShape: "Static frontend + API + realtime",
+      dataShape: "Mixed state",
+      trafficShape: "Campaign spikes",
+      flags: { uploads: true, websocket: true, multiTenant: true, scheduledJobs: true }
+    }
+  ] as const;
+
+  const [presetId, setPresetId] = useState<typeof presets[number]["id"]>("ticketfactory");
   const [target, setTarget] = useState("ECS Fargate");
+  const [appShape, setAppShape] = useState("Web + API + Worker");
+  const [dataShape, setDataShape] = useState("Mixed state");
+  const [trafficShape, setTrafficShape] = useState("Steady with bursts");
+  const [flags, setFlags] = useState({
+    uploads: true,
+    websocket: true,
+    multiTenant: true,
+    scheduledJobs: true
+  });
+
+  const applyPreset = (preset: typeof presets[number]) => {
+    setPresetId(preset.id);
+    setTarget(preset.target);
+    setAppShape(preset.appShape);
+    setDataShape(preset.dataShape);
+    setTrafficShape(preset.trafficShape);
+    setFlags(preset.flags);
+  };
+
+  const toggleFlag = (flagKey: keyof typeof flags) => {
+    setFlags((current) => ({ ...current, [flagKey]: !current[flagKey] }));
+  };
+
   const recommendation = useMemo(() => {
-    if (target === "EC2") return `${tenant.name}: Start with EC2 + Docker Compose, then extract RDS and S3. 適合先理解 Linux server deployment。`;
-    if (target === "ECS Fargate") return `${tenant.name}: Build Docker images, push to ECR, run Laravel web/worker/scheduler as ECS services. 最符合 container deployment 主線。`;
-    return `${tenant.name}: Use S3 + CloudFront for React, ECS for API, RDS for database, and CloudWatch for logs.`;
-  }, [target, tenant.name]);
+    const entries = [
+      `tenant: ${tenant.name}`,
+      `target: ${target}`,
+      `app: ${appShape}`,
+      `data: ${dataShape}`,
+      `traffic: ${trafficShape}`
+    ];
+
+    const route =
+      target === "EC2"
+        ? [
+            "先用 EC2 + Docker Compose 跑出第一版可回滾部署，Day 4 先處理上線與 rollback。",
+            "Day 5 再把 PostgreSQL、uploads、Redis 逐步抽成 managed service。",
+            "如果是手機閱讀，先把 services-to-AWS mapping 畫清楚，再回到實機補 command。"
+          ]
+        : target === "ECS Fargate"
+          ? [
+              "先做 production image，再把 Laravel web / worker / scheduler 拆成 ECS services。",
+              "frontend 優先走 S3 + CloudFront，資料層走 RDS / ElastiCache。",
+              "這條路最接近課程的主線 production 化節奏。"
+            ]
+          : [
+              "frontend 先獨立成 S3 + CloudFront，API 與 worker 走 ECS。",
+              "資料庫維持 RDS，檔案上傳改 S3，觀測與警示接 CloudWatch。",
+              "這條路最適合多半現代化、但還沒完全切完的專案。"
+            ];
+
+    return `${entries.join(" · ")}\n${route.join(" ")}`;
+  }, [appShape, dataShape, target, tenant.name, trafficShape]);
+
+  const mappingRows = useMemo(() => {
+    const rows = [
+      {
+        local: "React / Frontend",
+        aws: target === "EC2" ? "EC2 Nginx or S3 + CloudFront" : "S3 + CloudFront",
+        reason: "先把靜態資產與 API 入口切開。",
+        highlight: "frontend"
+      },
+      {
+        local: "Laravel API",
+        aws: target === "EC2" ? "EC2 Docker Compose" : "ECS Fargate",
+        reason: "API 先決定 compute boundary，再處理 scale。",
+        highlight: "api"
+      },
+      {
+        local: "PostgreSQL",
+        aws: "RDS PostgreSQL",
+        reason: "交易資料需要備份、私網與獨立生命週期。",
+        highlight: "data"
+      },
+      {
+        local: "Redis / Queue / Session",
+        aws: "ElastiCache Redis",
+        reason: "讓快取、排程與 session 和主要資料分離。",
+        highlight: "cache"
+      },
+      {
+        local: "Uploads / Files",
+        aws: "S3 + presigned URL",
+        reason: "上傳檔不要留在 container 或單台主機上。",
+        highlight: "storage"
+      }
+    ];
+
+    if (flags.websocket) {
+      rows.push({
+        local: "WebSocket / Reverb",
+        aws: "ALB + ECS + Redis pub/sub",
+        reason: "即時通道要和交易 API 分開看。",
+        highlight: "realtime"
+      });
+    }
+
+    return rows;
+  }, [flags.websocket, target]);
+
+  const learningPath = useMemo(() => {
+    if (target === "EC2") {
+      return [
+        "Day 1-2：先盤點服務與 port 邊界",
+        "Day 3：把 dev mount 改成可交付 image",
+        "Day 4：用 EC2 先跑出第一版上線",
+        "Day 5：把 stateful 資源抽離",
+        "Day 6 之後：再逐步補 ECS、S3、RDS、觀測"
+      ];
+    }
+    if (target === "ECS Fargate") {
+      return [
+        "Day 1-2：建立 services-to-AWS mapping 與驗證證據",
+        "Day 3：產出 production image",
+        "Day 4-5：先有可跑的部署，再抽 stateful service",
+        "Day 6-15：補 boundary、CI/CD、observability",
+        "Day 16-30：把安全、成本、DR 串進 governance"
+      ];
+    }
+    return [
+      "Day 1-2：先定義 frontend / API / data 的責任邊界",
+      "Day 3：切出靜態資產與 production image",
+      "Day 4-5：把 EC2 或 ECS 作為過渡部署路徑",
+      "Day 6-15：把 worker、websocket、job queue 拆開",
+      "Day 16-30：補 multi-tenant、DR、成本與審查能力"
+    ];
+  }, [target]);
+
+  const flagsSummary = [
+    flags.uploads ? "uploads heavy" : "no upload focus",
+    flags.websocket ? "websocket enabled" : "no realtime",
+    flags.multiTenant ? "multi-tenant" : "single tenant",
+    flags.scheduledJobs ? "scheduled jobs" : "no scheduler"
+  ];
+
+  const scenarioScore = [
+    target === "EC2" ? 1 : 2,
+    appShape.toLowerCase().includes("realtime") ? 2 : 1,
+    dataShape.includes("Mixed") ? 2 : 1,
+    trafficShape.includes("spikes") ? 2 : 1,
+    flags.uploads ? 2 : 0,
+    flags.websocket ? 2 : 0,
+    flags.multiTenant ? 1 : 0,
+    flags.scheduledJobs ? 1 : 0
+  ].reduce((sum, value) => sum + value, 0);
+
   return (
     <section className="stack">
-      <SectionHeader title="情境輸入 / Scenario Builder" desc="用目前 tenant 的專案條件產生 AWS deployment path。" />
-      <div className="grid two">
-        <Panel title="Project Stack">
-          {["Laravel + React", "PostgreSQL", "Redis Queue", "Nginx Reverse Proxy", "Horizon Worker", "Reverb WebSocket"].map((item) => (
-            <label className="check-option" key={item}><input type="checkbox" defaultChecked /> {item}</label>
-          ))}
+      <SectionHeader title="情境落地引導 / Scenario Onboarding" desc="先把專案條件整理清楚，再回推 AWS 路徑、學習順序與下一步該進哪個 Day。" />
+      <div className="scenario-builder-grid">
+        <Panel title="1. 選擇情境模板">
+          <div className="scenario-preset-grid">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={`scenario-preset-card ${presetId === preset.id ? "active" : ""}`}
+                onClick={() => applyPreset(preset)}
+              >
+                <strong>{preset.name}</strong>
+                <span>{preset.description}</span>
+                <small>{preset.target} · {preset.appShape}</small>
+              </button>
+            ))}
+          </div>
         </Panel>
-        <Panel title="AWS Target">
-          <select value={target} onChange={(event) => setTarget(event.target.value)}>
-            <option>EC2</option>
-            <option>ECS Fargate</option>
-            <option>Hybrid Static + ECS</option>
-          </select>
-          <div className="recommendation">{recommendation}</div>
-        </Panel>
+
+        <div className="grid two scenario-grid-rows">
+          <Panel title="2. 補齊專案條件">
+            <div className="scenario-field-grid">
+              <label>
+                <span>Deployment Target</span>
+                <select value={target} onChange={(event) => setTarget(event.target.value)}>
+                  <option>EC2</option>
+                  <option>ECS Fargate</option>
+                  <option>Hybrid Static + ECS</option>
+                </select>
+              </label>
+              <label>
+                <span>App Shape</span>
+                <select value={appShape} onChange={(event) => setAppShape(event.target.value)}>
+                  <option>Web + API + Worker</option>
+                  <option>Monolith on one host</option>
+                  <option>Static frontend + API + realtime</option>
+                </select>
+              </label>
+              <label>
+                <span>Data Shape</span>
+                <select value={dataShape} onChange={(event) => setDataShape(event.target.value)}>
+                  <option>Mixed state</option>
+                  <option>Strong state</option>
+                  <option>Mostly stateless</option>
+                </select>
+              </label>
+              <label>
+                <span>Traffic Shape</span>
+                <select value={trafficShape} onChange={(event) => setTrafficShape(event.target.value)}>
+                  <option>Steady with bursts</option>
+                  <option>Low steady traffic</option>
+                  <option>Campaign spikes</option>
+                </select>
+              </label>
+            </div>
+            <div className="scenario-toggle-grid">
+              {[
+                ["uploads", "Uploads / Files"],
+                ["websocket", "WebSocket / Reverb"],
+                ["multiTenant", "Multi-tenant"],
+                ["scheduledJobs", "Scheduled Jobs"]
+              ].map(([key, label]) => {
+                const checked = flags[key as keyof typeof flags];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`scenario-toggle ${checked ? "active" : ""}`}
+                    onClick={() => toggleFlag(key as keyof typeof flags)}
+                  >
+                    <span>{checked ? "On" : "Off"}</span>
+                    <strong>{label}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="scenario-meta">
+              {flagsSummary.map((item) => <span key={item}>{item}</span>)}
+            </div>
+          </Panel>
+
+          <Panel title="3. 落地建議">
+            <div className="recommendation scenario-recommendation">
+              <strong>{tenant.name}</strong>
+              <p>{recommendation}</p>
+            </div>
+            <div className="scenario-score-card">
+              <span>情境複雜度</span>
+              <strong>{scenarioScore}/10</strong>
+              <small>{scenarioScore >= 8 ? "先把邊界拆清楚，再進 ECS / DR / multi-tenant，這會是比較完整的 production-onboarding 路線。" : scenarioScore >= 4 ? "適合先做 production image + first deploy，再逐步抽離，這是典型的落地引導節奏。" : "可先用 EC2 + Docker Compose 走最小可用路徑，先把第一步走穩。"}</small>
+            </div>
+          </Panel>
+        </div>
+
+        <div className="grid two scenario-grid-rows">
+          <Panel title="4. AWS 對應視圖">
+            <div className="scenario-mapping-list">
+              {mappingRows.map((row) => (
+                <article className={`scenario-mapping-card ${row.highlight}`} key={row.local}>
+                  <div>
+                    <strong>{row.local}</strong>
+                    <span>{row.aws}</span>
+                  </div>
+                  <small>{row.reason}</small>
+                </article>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="5. 下一步學習順序">
+            <ol className="scenario-learning-path">
+              {learningPath.map((step) => <li key={step}>{step}</li>)}
+            </ol>
+            <div className="scenario-callout">
+              <strong>導師提示</strong>
+              <p>先在手機上把情境填清楚，再回到實機補 command、log、截圖和 rollback note。這頁的任務不是背 AWS 名詞，是幫你決定「下一步要學什麼」，也就是把專案真正帶進 AWS 的起點。</p>
+            </div>
+          </Panel>
+        </div>
       </div>
     </section>
   );
 }
 
-function InteractiveLab() {
+function InteractiveLab({ openLesson }: { openLesson: (day: number) => void }) {
   const [selected, setSelected] = useState(0);
   const [diagnoses, setDiagnoses] = useState<Record<string, string>>({});
   const lab = labs[selected];
   const chosen = diagnoses[lab.title];
   const isCorrect = chosen === lab.correctDiagnosis;
+  const primaryDay = lab.relatedDays[0] ?? 1;
+  const secondaryDays = lab.relatedDays.slice(1);
   const stageLabels: Record<StageKey, string> = {
     deployment: "Deployment Day 1-5",
     advanced: "Advanced Day 6-15",
@@ -2554,23 +3227,35 @@ function InteractiveLab() {
 
   return (
     <section className="stack">
-      <SectionHeader title="互動模式 / Interactive Lab" desc={`${labs.length} 個真實部署故障情境。先選診斷，再看修復與預防。`} />
+      <SectionHeader title="互動模式 / Interactive Lab" desc={`${labs.length} 個真實部署故障情境。先看症狀，再做診斷，最後回到對應 Day 補強。`} />
+      <div className="lab-flow-strip">
+        <span>1 觀察症狀</span>
+        <span>2 選擇診斷</span>
+        <span>3 查看修復</span>
+        <span>4 回到對應 Day</span>
+      </div>
       <div className="grid two uneven">
-        <Panel title="Debug Scenarios">
-          <div className="lab-summary-strip">
-            <span>{labs.filter((item) => item.stageKey === "deployment").length} Deployment</span>
-            <span>{labs.filter((item) => item.stageKey === "advanced").length} Advanced</span>
-            <span>{labs.filter((item) => item.stageKey === "deep-dive").length} Deep Dive</span>
-          </div>
-          {labs.map((item, index) => (
-            <button key={item.title} className={`row-button ${selected === index ? "selected" : ""}`} onClick={() => setSelected(index)}>
-              <TerminalSquare size={18} />
-              <span>
-                <strong>{item.title}</strong>
-                <small>{stageLabels[item.stageKey]} · Day {item.relatedDays.join(", ")}</small>
-              </span>
-            </button>
-          ))}
+        <Panel title="情境清單">
+          <details className="lab-scenario-collapse" open>
+            <summary>展開 / 收合情境清單</summary>
+            <div className="lab-panel-note">Debug Scenarios：左側先看情境標題，再用中文輔助理解這個故障在課程裡代表什麼。</div>
+            <div className="lab-summary-strip">
+              <span>{labs.filter((item) => item.stageKey === "deployment").length} Deployment</span>
+              <span>{labs.filter((item) => item.stageKey === "advanced").length} Advanced</span>
+              <span>{labs.filter((item) => item.stageKey === "deep-dive").length} Deep Dive</span>
+            </div>
+            <div className="lab-scenario-list">
+              {labs.map((item, index) => (
+                <button key={item.title} className={`row-button ${selected === index ? "selected" : ""}`} onClick={() => setSelected(index)}>
+                  <TerminalSquare size={18} />
+                  <span>
+                    <strong>{item.title}</strong>
+                    <small>{stageLabels[item.stageKey]} · Day {item.relatedDays.join(", ")}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </details>
         </Panel>
         <Panel title={lab.title}>
           <div className="scenario-meta">
@@ -2578,10 +3263,22 @@ function InteractiveLab() {
             <span>{lab.skillArea}</span>
             <span>Day {lab.relatedDays.join(", ")}</span>
           </div>
-          <div className="hint"><strong>Symptom</strong>{lab.symptom}</div>
-          <div className="hint"><strong>Evidence</strong>{lab.evidence}</div>
+          <div className="lab-story-grid">
+            <article className="lab-story-card symptom">
+              <strong>Symptom / 症狀</strong>
+              <p>{lab.symptom}</p>
+            </article>
+            <article className="lab-story-card evidence">
+              <strong>Evidence / 證據</strong>
+              <p>{lab.evidence}</p>
+            </article>
+          </div>
+          <div className="lab-coach-panel">
+            <strong>Coach Prompt / 教練提示</strong>
+            <p>先判斷這是網路、設定、image、資料層，還是 release 流程的問題。你選的答案會告訴你該回到哪個課程段落補強。</p>
+          </div>
           <div className="diagnosis-options">
-            <strong>選擇你的診斷 / Choose diagnosis</strong>
+            <strong>Step 2 - 選擇你的診斷 / Choose diagnosis</strong>
             {lab.choices.map((choice) => {
               const active = chosen === choice;
               const reveal = Boolean(chosen);
@@ -2605,8 +3302,14 @@ function InteractiveLab() {
           )}
           {chosen && (
             <div className="lab-remediation-grid">
-              <div className="hint success"><strong>Fix</strong>{lab.fix}</div>
-              <div className="hint"><strong>Prevention</strong>{lab.prevention}</div>
+              <div className="lab-remediation-card fix">
+                <strong>Fix / 修復</strong>
+                <p>{lab.fix}</p>
+              </div>
+              <div className="lab-remediation-card prevention">
+                <strong>Prevention / 預防</strong>
+                <p>{lab.prevention}</p>
+              </div>
             </div>
           )}
           <div className="exam-mapping-block">
@@ -2614,6 +3317,15 @@ function InteractiveLab() {
             <div className="exam-chip-row">
               {lab.examMapping.map((item) => <span key={item}>{item}</span>)}
             </div>
+          </div>
+          <div className="lab-next-steps">
+            <div>
+              <strong>回到對應課程</strong>
+              <p>Day {primaryDay}{secondaryDays.length ? `、Day ${secondaryDays.join("、Day ")}` : ""}</p>
+            </div>
+            <button className="primary" onClick={() => openLesson(primaryDay)}>
+              開啟 Day {primaryDay}
+            </button>
           </div>
         </Panel>
       </div>
@@ -2637,6 +3349,7 @@ function QuizView({
   const [stageFilter, setStageFilter] = useState<"all" | StageKey>("deployment");
   const [skillFilter, setSkillFilter] = useState<"all" | SkillArea>("all");
   const [mode, setMode] = useState<"daily" | "stage" | "all">("daily");
+  const [showChinese, setShowChinese] = useState(false);
   const visibleQuestions = quizQuestions.filter((question) => {
     const stageMatch = stageFilter === "all" || question.stageKey === stageFilter;
     const skillMatch = skillFilter === "all" || question.skillArea === skillFilter;
@@ -2646,6 +3359,13 @@ function QuizView({
       (mode === "stage" && typeof question.day !== "number");
     return stageMatch && skillMatch && modeMatch;
   });
+  const shuffledOptionsByQuestion = useMemo(
+    () =>
+      Object.fromEntries(
+        visibleQuestions.map((question) => [question.id, shuffleArray(question.options)])
+      ) as Record<string, string[]>,
+    [mode, skillFilter, stageFilter]
+  );
   const wrongQuestions = result === null ? [] : visibleQuestions.filter((question) => answers[question.id] !== question.answer);
   const weaknessRows = Object.entries(
     wrongQuestions.reduce<Record<string, number>>((acc, question) => {
@@ -2696,6 +3416,14 @@ function QuizView({
               <option value="all">All skills</option>
               {skillAreas.map((area) => <option key={area} value={area}>{area}</option>)}
             </select>
+            <button
+              type="button"
+              className={`quiz-language-toggle ${showChinese ? "active" : ""}`}
+              onClick={() => setShowChinese((current) => !current)}
+            >
+              <span>{showChinese ? "On" : "Off"}</span>
+              <strong>中文顯示 / Chinese</strong>
+            </button>
           </div>
         </div>
         <div className="quiz-count-row">
@@ -2738,10 +3466,13 @@ function QuizView({
           </div>
           <p>{question.promptEn}</p>
           <div className="options">
-            {question.options.map((option) => (
+            {(shuffledOptionsByQuestion[question.id] ?? question.options).map((option) => (
               <label key={option} className={`${answers[question.id] === option ? "option active-option" : "option"} ${result !== null && option === question.answer ? "correct-option" : ""} ${result !== null && answered === option && option !== question.answer ? "wrong-option" : ""}`}>
                 <input type="radio" name={question.id} checked={answers[question.id] === option} onChange={() => setAnswers({ ...answers, [question.id]: option })} />
-                {option}
+                <span className="option-copy">
+                  <span className="option-en">{quizOptionEnglish(option)}</span>
+                  {showChinese && <span className="option-zh">{option}</span>}
+                </span>
               </label>
             ))}
           </div>
@@ -3055,18 +3786,210 @@ function AdminDashboard({ store, activeTenant, onLogout }: { store: Store; activ
 }
 
 function Glossary() {
-  const terms = [
-    ["Tenant", "多租戶中的組織或 workspace，資料與學習進度需要隔離。"],
-    ["ECS Fargate", "免管理 EC2 主機的 container runtime。"],
-    ["RDS", "Managed relational database，用於 production PostgreSQL/MySQL。"],
-    ["S3", "Object storage，適合放 uploads、exports、static files。"],
-    ["CloudWatch", "AWS logs and metrics observability service。"],
-    ["Security Group", "AWS network firewall，限制誰可以連誰。"]
-  ];
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("全部");
+
+  const normalizeQuery = (value: string) => value.trim().toLowerCase();
+
+  const allTerms = useMemo<GlossaryItem[]>(() => [
+    { term: "Tenant", zh: "租戶", category: "架構", descZh: "多租戶架構中的獨立組織或 workspace，資料、權限與學習進度都應彼此隔離。", descEn: "An isolated organization or workspace in a multi-tenant system where data, access, and learning progress stay separated." },
+    { term: "Docker", zh: "Docker", category: "容器化", descZh: "容器化最基礎抽象，將服務打包成 image 並透過 container 運行。", descEn: "Container platform that packages applications as images and runs them in standardized containers." },
+    { term: "Docker Compose", zh: "Docker Compose", category: "容器化", descZh: "以單一宣告文件同時啟動多個 container，定義 service、網路與 volumes。", descEn: "A tool to run multiple containers from a single definition by describing services, networks, and volumes together." },
+    { term: "Dockerfile", zh: "Dockerfile", category: "容器化", descZh: "建置 image 的指令檔，決定 base image、copy 檔案、執行環境與啟動命令。", descEn: "A build recipe file that defines how an image is created: base image, files, dependencies, and runtime command." },
+    { term: "Image", zh: "映像檔", category: "容器化", descZh: "可重複部署的 container 模板，包含 runtime、library、環境變數等設定。", descEn: "An immutable template for containers that includes OS, runtime, libraries, and app configuration." },
+    { term: "Container", zh: "容器", category: "容器化", descZh: "將程式與依賴包在可搬移單元中，與主機隔離、可控資源。", descEn: "A lightweight package containing app code and dependencies, isolated from the host with controlled resources." },
+    { term: "ECS", zh: "Elastic Container Service", category: "容器編排", descZh: "AWS 管理型容器執行平台，常搭配 Fargate 或 EC2 launch type。", descEn: "AWS managed container platform that supports running containers with ECS service scheduler." },
+    { term: "ECS Fargate", zh: "無伺服器容器執行環境", category: "容器編排", descZh: "AWS 提供的 serverless container runtime，不需自己管理 EC2 主機。", descEn: "AWS serverless container runtime that removes EC2 host management burden." },
+    { term: "ECS Service", zh: "ECS 服務", category: "容器編排", descZh: "定義想要維持的 task 數量、部署策略與 health check 行為。", descEn: "Defines desired task count, deployment strategy, and health-check behavior for running containers." },
+    { term: "Task Definition", zh: "Task 定義", category: "容器編排", descZh: "ECS 運行容器的版本藍圖，包含 image、資源、環境變數與 port 映射。", descEn: "A recipe for running a container task in ECS, including image, resources, env vars, and port mapping." },
+    { term: "Cluster", zh: "叢集", category: "容器編排", descZh: "ECS 托管 container 的邏輯資源群組，便於統一調度與監控。", descEn: "Logical group for ECS resources to organize scheduling and monitoring boundaries." },
+    { term: "Fargate Profile", zh: "Fargate 設定檔", category: "容器編排", descZh: "定義在 Fargate 任務中可用的執行角色與網路權限控制。", descEn: "Defines execution roles and network/security controls for workloads running on Fargate." },
+    { term: "RDS", zh: "受管關聯式資料庫", category: "資料層", descZh: "AWS 的 managed relational database，正式環境常用來承載 PostgreSQL 或 MySQL。", descEn: "AWS managed relational database service commonly used for production PostgreSQL or MySQL workloads." },
+    { term: "Aurora", zh: "Aurora", category: "資料層", descZh: "高可用的 AWS managed 資料庫服務，效能較一般 RDS 高。", descEn: "High-performance managed relational database option from AWS with strong availability and scalability." },
+    { term: "S3", zh: "物件儲存", category: "儲存", descZh: "適合存放 uploads、exports、備份與前端靜態檔，不適合直接當傳統檔案系統。", descEn: "Object storage for uploads, exports, backups, and static assets instead of mounted file-system style IO." },
+    { term: "ElastiCache", zh: "ElastiCache", category: "資料層", descZh: "託管快取服務，常拿來做 session、queue cache、熱資料加速。", descEn: "Managed cache service for speeding up hot reads, session state, and transient data workloads." },
+    { term: "CloudWatch", zh: "日誌與監控服務", category: "監控", descZh: "集中查看 logs、metrics、alarms，協助驗證部署狀態與排查 production 問題。", descEn: "Cloud observability service for logs, metrics, and alarms in deployment verification and troubleshooting." },
+    { term: "CloudTrail", zh: "操作紀錄審計", category: "安全", descZh: "記錄 AWS API 操作，當作安全稽核、事件追蹤的重要線索。", descEn: "Records AWS API activity and serves as a key source for security audit and incident tracing." },
+    { term: "Security Group", zh: "安全群組", category: "網路安全", descZh: "AWS 實例/服務的狀態封包存取控制規則。", descEn: "Stateful virtual firewall rules controlling inbound and outbound traffic for AWS resources." },
+    { term: "WAF", zh: "Web Application Firewall", category: "網路安全", descZh: "防禦應用層常見 Web 攻擊，常搭配 CloudFront/ALB。", descEn: "Application firewall service for filtering web traffic and defending against common Layer 7 attacks." },
+    { term: "IAM", zh: "身份與存取管理", category: "安全", descZh: "定義角色、權限與 policy，實作最小權限與跨服務授權。", descEn: "Defines users, roles, policies, and least-privilege controls for AWS resource access." },
+    { term: "VPC", zh: "虛擬私有雲", category: "網路", descZh: "把 AWS 資源放進獨立邊界，做路由、IP、存取控制與隔離。", descEn: "Isolated AWS network boundary with routing, IP range, and access control design." },
+    { term: "Subnet", zh: "子網路", category: "網路", descZh: "VPC 中的邏輯區段，public/private 影響對外服務能力。", descEn: "Logical subdivisions in a VPC, where public and private design determines exposure and access." },
+    { term: "Route Table", zh: "路由表", category: "網路", descZh: "決定封包流向與是否能到達 IGW、NAT、私有端點。", descEn: "Controls traffic routes inside a VPC and directs where subnets can reach." },
+    { term: "Internet Gateway", zh: "網際網路閘道", category: "網路", descZh: "讓 public subnet 連上公網的入口，與 route table 一起生效。", descEn: "Gateway that provides internet entry for public subnets when paired with correct routes." },
+    { term: "NAT Gateway", zh: "NAT 閘道", category: "網路", descZh: "讓 private subnet 主動連外，保留 private subnet 不直接曝露。", descEn: "Lets private subnets access the internet outbound without exposing inbound public entry." },
+    { term: "ALB", zh: "應用負載平衡器", category: "網路", descZh: "Layer 7 平衡 HTTP/HTTPS 流量，可做 target 檢查與路徑導向。", descEn: "Layer 7 load balancer for HTTP/HTTPS with path-based routing and target health checks." },
+    { term: "NLB", zh: "網路負載平衡器", category: "網路", descZh: "高效能 Layer 4 負載平衡器，常用於 TCP/UDP 流量。", descEn: "Layer 4 load balancer optimized for TCP/UDP traffic and fast connection handling." },
+    { term: "Route 53", zh: "DNS 與路由服務", category: "網路", descZh: "管理網域與路由策略，支援流量導向與故障轉移。", descEn: "DNS and routing service for domain management, traffic steering, and failover." },
+    { term: "ACM", zh: "憑證管理服務", category: "網路", descZh: "管理 TLS 憑證並整合 ALB、CloudFront 做 HTTPS。", descEn: "Manages TLS certificates for HTTPS integration with ALB or CloudFront." },
+    { term: "CloudFront", zh: "內容傳遞網路", category: "效能", descZh: "將靜態檔快取到邊緣節點，降低延遲並保護原始站。", descEn: "CDN service to cache content at edge locations for lower latency and origin protection." },
+    { term: "CloudMap", zh: "Cloud Map", category: "網路", descZh: "服務發現機制，讓服務可透過名稱而非硬編 IP 互訪。", descEn: "Service discovery utility enabling service-to-service connectivity by name." },
+    { term: "SQS", zh: "SQS", category: "資料層", descZh: "非同步訊息佇列，常用於 worker 任務解耦。", descEn: "Managed queue for asynchronous messaging and decoupling producer-consumer workloads." },
+    { term: "SNS", zh: "SNS", category: "訊息", descZh: "主題訂閱式通知服務，用來推送事件與警示。", descEn: "Publish/subscribe messaging service for event notifications and fan-out architecture." },
+    { term: "EventBridge", zh: "事件匯流排", category: "訊息", descZh: "彙整 AWS 與自建事件，路由至 Lambda、SQS、Step Functions。", descEn: "Event bus for routing system events across AWS services and custom targets." },
+    { term: "CodeCommit", zh: "原始碼庫", category: "CI/CD", descZh: "AWS 的 Git 原始碼託管服務。", descEn: "AWS-managed Git source control service for repositories and branches." },
+    { term: "CodeBuild", zh: "建置服務", category: "CI/CD", descZh: "編譯、測試與建置 image 或 artifact 的全自動建置服務。", descEn: "Managed build service for compile/test workflows and artifact generation." },
+    { term: "CodePipeline", zh: "部署流程服務", category: "CI/CD", descZh: "把 build、test、deploy 串成 release pipeline。", descEn: "Managed orchestration service to connect source, build, test, and deployment stages." },
+    { term: "CodeDeploy", zh: "部署推送服務", category: "CI/CD", descZh: "可控版本發布到 EC2、ECS、Lambda，支援藍綠或滾動。", descEn: "Service for controlled application deployment to EC2/ECS/Lambda with rolling or blue-green strategies." },
+    { term: "Launch Template", zh: "啟動範本", category: "部署", descZh: "建立 EC2 啟動設定與版本，保證 launch 一致性。", descEn: "Template to standardize EC2 launch configuration and keep instances repeatable." },
+    { term: "EC2", zh: "EC2", category: "計算", descZh: "可彈性配置的虛擬主機，適合需要完整 OS 控制的工作負載。", descEn: "Elastic virtual servers for workloads that need direct OS-level control." },
+    { term: "Auto Scaling Group", zh: "自動擴縮群組", category: "運維", descZh: "依據指標調整 EC2 實例數量，保持效能與成本平衡。", descEn: "Automatically scales EC2 instances based on policies and metrics." },
+    { term: "EIP", zh: "彈性 IP", category: "網路", descZh: "固定對外 IPv4 地址，避免重啟後變動。", descEn: "Static public IPv4 address retained across instance lifecycle events." },
+    { term: "Bastion Host", zh: "跳板機", category: "安全", descZh: "集中管理私有網段 SSH 進入點，降低管理主機暴露面。", descEn: "Hardened jump host controlling secure access into private resources." },
+    { term: "Parameter Store", zh: "參數儲存", category: "安全", descZh: "集中管理 runtime 設定值，常與 Secrets Manager 分工使用。", descEn: "Central configuration store for runtime parameters, often paired with Secrets Manager." },
+    { term: "Secrets Manager", zh: "祕密管理器", category: "安全", descZh: "儲存並輪換憑證，不把密碼寫在 image 或 repo 內。", descEn: "Stores and rotates secrets so credentials are never hardcoded in image or repo." },
+    { term: "Deployment", zh: "部署", category: "開發流程", descZh: "將可追蹤的程式與設定推進 staging/prod 的完整流程。", descEn: "A controlled rollout of code/config across environments with observability and verification." },
+    { term: "Rollback", zh: "回滾", category: "開發流程", descZh: "發生錯誤時快速回退到上個穩定版，縮短故障影響時間。", descEn: "Fast fallback to a previously stable version when a release fails checks." },
+    { term: "CloudFormation", zh: "CloudFormation", category: "基礎建設即代碼", descZh: "以宣告式模板管理 AWS 資源，幫你把環境建置流程版本化。", descEn: "Infrastructure-as-code service to define and provision AWS resources in repeatable templates." }
+  ], []);
+
+  const uniqueCategory = useMemo(() => {
+    return ["全部", ...Array.from(new Set(allTerms.map((term) => term.category)))] as string[];
+  }, [allTerms]);
+  const normalizedQuery = normalizeQuery(query);
+
+  const scoreMatch = (item: GlossaryItem, keywords: string[]) => {
+    const term = item.term.toLowerCase();
+    const zh = item.zh.toLowerCase();
+    const descZh = item.descZh.toLowerCase();
+    const descEn = item.descEn.toLowerCase();
+    const category = item.category.toLowerCase();
+
+    let score = 0;
+    keywords.forEach((keyword, index) => {
+      const weight = keywords.length - index;
+      const boost = Math.max(1, weight);
+
+      if (term.startsWith(keyword)) score += 120 * boost;
+      else if (term.includes(keyword)) score += 90 * boost;
+
+      if (zh.startsWith(keyword)) score += 90 * boost;
+      else if (zh.includes(keyword)) score += 60 * boost;
+
+      if (category.includes(keyword)) score += 40;
+      if (descZh.includes(keyword)) score += 20;
+      if (descEn.includes(keyword)) score += 14;
+    });
+
+    return score;
+  };
+
+  const filteredTerms = useMemo(() => {
+    const terms = allTerms.filter((item) => {
+      const matchCategory = categoryFilter === "全部" || item.category === categoryFilter;
+      const matchQuery = !normalizedQuery || `${item.term} ${item.zh} ${item.descZh} ${item.descEn}`.toLowerCase().includes(normalizedQuery);
+      return matchCategory && matchQuery;
+    });
+
+    if (!normalizedQuery) {
+      return terms;
+    }
+
+    const keywords = normalizedQuery.split(/\s+/).filter(Boolean);
+    return terms
+      .map((item) => ({ item, score: scoreMatch(item, keywords) }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ item }) => item);
+  }, [allTerms, categoryFilter, normalizedQuery]);
+
+  const suggestions = useMemo(() => {
+    if (!normalizedQuery) return [];
+    const keywords = normalizedQuery.split(/\s+/).filter(Boolean);
+    return allTerms
+      .filter((item) => `${item.term} ${item.zh} ${item.category}`.toLowerCase().includes(normalizedQuery))
+      .map((item) => ({
+        term: item.term,
+        zh: item.zh,
+        category: item.category,
+        score: scoreMatch(item, keywords)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .map((item) => ({ term: item.term, zh: item.zh, category: item.category }))
+      .slice(0, 8);
+  }, [allTerms, normalizedQuery]);
+
+  const highlight = (value: string) => {
+    if (!normalizedQuery) return value;
+    const parts = normalizedQuery.split(" ").filter(Boolean);
+    if (!parts.length) return value;
+    const safe = parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    const regex = new RegExp(`(${safe})`, "ig");
+    const chunks = value.split(regex);
+    return chunks.map((chunk, index) => {
+      if (!chunk) return null;
+      if (index % 2 === 1) {
+        return <mark key={`${value}-${index}`} className="term-highlight">{chunk}</mark>;
+      }
+      return <span key={`${value}-${index}`}>{chunk}</span>;
+    });
+  };
+
+  const suggestionCount = filteredTerms.length;
+
   return (
     <section className="stack">
-      <SectionHeader title="名詞表 / Glossary" desc="專業名詞保留 English，搭配中文部署脈絡。" />
-      <div className="term-grid">{terms.map(([term, desc]) => <Panel key={term} title={term}><p>{desc}</p></Panel>)}</div>
+      <SectionHeader title="名詞表 / Glossary" desc="每個術語都用 English + 繁中對照，方便對 AWS 文件、考試與課程脈絡。" />
+      <div className="term-search search">
+        <Search size={16} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search 直接輸入英文或中文關鍵字，例如：VPC / 租戶 / Deployment"
+        />
+        {query ? <button type="button" className="term-clear" onClick={() => setQuery("")}>清除</button> : null}
+      </div>
+      <div className="term-toolbar">
+        <div className="term-meta">
+          <span>{allTerms.length} 個名詞</span>
+          <span>{suggestionCount} 個結果</span>
+          <span>分類：{categoryFilter}</span>
+        </div>
+        <div className="term-filters" role="tablist" aria-label="名詞分類">
+          {uniqueCategory.map((category) => (
+            <button
+              type="button"
+              key={category}
+              className={categoryFilter === category ? "term-filter selected" : "term-filter"}
+              onClick={() => setCategoryFilter(category)}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+      </div>
+      {query && (
+        <div className="autocomplete-panel">
+          <p className="autocomplete-title">猜你會找 / Suggestions</p>
+          {suggestions.length ? suggestions.map((item) => (
+            <button
+              key={item.term}
+              className="autocomplete-item"
+              onClick={() => setQuery(item.term)}
+              type="button"
+            >
+              <span className="autocomplete-main">{item.term}</span>
+              <span className="autocomplete-sub">{item.zh}</span>
+              <small className="autocomplete-category">{item.category}</small>
+            </button>
+          )) : <p className="term-empty">沒有找到對應名詞，試著輸入「ALB / ECS / 安全群組 / Redis」。</p>}
+        </div>
+      )}
+      <div className="term-grid">
+        {filteredTerms.map((item) => (
+          <Panel key={`${item.term}-${item.zh}-${item.category}`} title={item.term}>
+            <div className="term-card-copy">
+              <p className="term-category">{item.category}</p>
+              <div className="term-head">
+                <strong>{highlight(item.zh)}</strong>
+                <span>{highlight(item.term)}</span>
+              </div>
+              <p className="term-desc term-desc-zh">{highlight(item.descZh)}</p>
+              <p className="term-desc term-desc-en">{highlight(item.descEn)}</p>
+            </div>
+          </Panel>
+        ))}
+        {!filteredTerms.length ? <p className="term-empty">尚未找到名詞，請調整關鍵字。</p> : null}
+      </div>
     </section>
   );
 }
@@ -3094,6 +4017,107 @@ function Numbered({ items }: { items: string[] }) {
 
 function Metric({ title, value, sub, icon }: { title: string; value: string; sub: string; icon: React.ReactNode }) {
   return <div className="metric"><div className="metric-icon">{icon}</div><span>{title}</span><strong>{value}</strong><small>{sub}</small></div>;
+}
+
+function shuffleArray<T>(items: T[]) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function quizOptionEnglish(option: string) {
+  const exactMap: Record<string, string> = {
+    "先把服務分成 stateless / stateful": "First split services into stateless / stateful",
+    "PostgreSQL + uploads/storage": "PostgreSQL + uploads/storage",
+    "services-to-AWS mapping table": "services-to-AWS mapping table",
+    "healthcheck + service connectivity checklist": "healthcheck + service connectivity checklist",
+    "分清 public ingress 與 internal service port": "Distinguish public ingress from internal service ports",
+    "移除 dev bind mount，產出可版本化 image": "Remove dev bind mounts and produce a versioned image",
+    "npm build 後的 dist artifact": "The dist artifact after `npm build`",
+    "先做到可上線、可驗證、可 rollback": "Make it deployable, verifiable, and rollback-ready",
+    "Security Group ingress 最小化": "Minimize Security Group ingress",
+    "DB、uploads、cache/session": "DB, uploads, cache/session",
+    "用 env / SSM / Secrets Manager 管理": "Manage via env / SSM / Secrets Manager",
+    "直接跳到下一天": "Skip directly to the next day",
+    "把錯誤截圖藏起來": "Hide the failure screenshot",
+    "取代所有測試": "Replace all tests",
+    "重複執行排程任務": "Run scheduled jobs repeatedly",
+    "字母順序": "Alphabetical order",
+    "檔案大小": "File size",
+    "誰先建立": "Who created it first",
+    "只需要更多顏色": "Only needs more color",
+    "只貼截圖": "Only attach screenshots",
+    "只列服務價格": "Only list service pricing",
+    "只放登入帳密": "Only include login credentials",
+    "口頭印象": "Verbal impression only",
+    "只連到首頁": "Only link to the homepage",
+    "只連到色票": "Only link to the color palette",
+    "可接受遺失多久資料": "How much data loss is acceptable",
+    "可接受多快登入": "How fast login must recover",
+    "按鈕顏色": "Button color"
+  };
+
+  if (exactMap[option]) return exactMap[option];
+
+  const replacements: Array<[RegExp, string]> = [
+    [/container 內/g, "inside the container"],
+    [/瀏覽器打/g, "browser opens"],
+    [/先用/g, "use"],
+    [/先把/g, "first"],
+    [/改成/g, "switch to"],
+    [/回到/g, "go back to"],
+    [/補齊/g, "complete"],
+    [/最常見/g, "most common"],
+    [/最合理/g, "most reasonable"],
+    [/無法/g, "cannot"],
+    [/失敗/g, "fails"],
+    [/沒有/g, "missing"],
+    [/不能/g, "cannot"],
+    [/避免/g, "avoid"],
+    [/設定/g, "configuration"],
+    [/驗證/g, "verify"],
+    [/資料層/g, "data layer"],
+    [/網路/g, "network"],
+    [/流程/g, "workflow"],
+    [/路徑/g, "path"],
+    [/權限/g, "permissions"],
+    [/公開/g, "public"],
+    [/私有/g, "private"],
+    [/容器/g, "container"],
+    [/資料庫/g, "database"],
+    [/瀏覽器/g, "browser"],
+    [/一個專案/g, "another project"],
+    [/看到/g, "shows"],
+    [/打/g, "opens"],
+    [/被關閉/g, "is disabled"],
+    [/被/g, "is"],
+    [/和/g, "and"],
+    [/或/g, "or"],
+    [/的/g, "of"],
+    [/在/g, "in"],
+    [/，/g, ", "],
+    [/。/g, "."],
+    [/：/g, ": "]
+  ];
+
+  let translated = option;
+  for (const [pattern, replacement] of replacements) {
+    translated = translated.replace(pattern, replacement);
+  }
+
+  translated = translated
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.:;])/g, "$1")
+    .replace(/\( /g, "(")
+    .replace(/ \)/g, ")")
+    .replace(/[\u4e00-\u9fff]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return translated || option;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
