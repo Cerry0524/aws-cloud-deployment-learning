@@ -25,10 +25,15 @@ nav button.active, nav button:hover { background: #e8f5ef; color: #05704f; }
 .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
 .topbar h1, .section-header h2 { margin: 0; font-size: 26px; line-height: 1.2; }
 .topbar p, .section-header p { margin: 5px 0 0; color: #6a7283; }
-.user-chip { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #fff; border: 1px solid #e4e9f1; border-radius: 999px; }
+.user-chip { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #fff; border: 1px solid #e4e9f1; border-radius: 999px; white-space: nowrap; }
 .user-chip::first-letter { color: #fff; }
 .user-chip { color: #fff; background: linear-gradient(90deg, #16233a 0 36px, #fff 36px); }
 .user-chip span { color: #172033; padding-left: 6px; }
+.top-actions { display: flex; gap: 10px; align-items: center; }
+.tenant-switcher { display: grid; gap: 8px; padding: 12px; border: 1px solid #e3e8f0; border-radius: 8px; background: #f7faf9; }
+.tenant-switcher label { color: #536071; font-size: 12px; font-weight: 700; }
+.tenant-switcher select { padding: 9px 10px; }
+.tenant-switcher small { color: #6a7283; line-height: 1.35; }
 
 .stack { display: grid; gap: 18px; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
@@ -85,6 +90,16 @@ input[type="radio"], input[type="checkbox"] { width: auto; padding: 0; flex: 0 0
 .skill-row { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; margin: 14px 0; }
 .term-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 
+.auth-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 32px; padding: 48px; align-items: center; background: #f6f8fb; }
+.auth-intro { max-width: 780px; display: grid; gap: 22px; }
+.auth-intro h1 { margin: 0; font-size: clamp(34px, 5vw, 62px); line-height: 1.03; letter-spacing: 0; }
+.auth-intro p { color: #536071; font-size: 18px; line-height: 1.65; max-width: 640px; }
+.auth-steps { display: grid; gap: 12px; }
+.auth-steps div { display: flex; gap: 10px; align-items: center; padding: 14px; border: 1px solid #dfe6ef; border-radius: 8px; background: #fff; color: #172033; }
+.auth-steps svg { color: #07835f; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.auth-tabs button { border: 1px solid #dfe6ef; border-radius: 8px; padding: 10px; background: #fff; color: #536071; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
+.auth-tabs .active-tab { border-color: #07835f; color: #05704f; background: #edf8f3; }
 .auth-page { min-height: 70vh; display: grid; place-items: center; }
 .auth-card { width: min(440px, 100%); padding: 30px; display: grid; gap: 14px; }
 .auth-card svg { color: #07835f; }
@@ -102,18 +117,28 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 .blocked { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid #e7ecf2; }
 .blocked span { width: 26px; height: 26px; display: grid; place-items: center; background: #07835f; color: #fff; border-radius: 6px; }
 .blocked strong { color: #d65413; }
+.zero-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.zero-step { border: 1px solid #dfe6ef; background: #fff; border-radius: 8px; padding: 16px; min-height: 220px; text-align: left; display: grid; gap: 10px; align-content: start; cursor: pointer; color: #172033; }
+.zero-step svg { color: #a9b3c1; }
+.zero-step strong { line-height: 1.35; }
+.zero-step span { color: #536071; line-height: 1.55; }
+.zero-step small { color: #7b8495; line-height: 1.4; }
+.zero-step.done { border-color: #07835f; background: #edf8f3; }
+.zero-step.done svg { color: #07835f; }
 
 @media (max-width: 1050px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { position: static; }
   nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .metrics, .grid.two, .grid.three, .grid.uneven, .roadmap-grid, .term-grid { grid-template-columns: 1fr; }
+  .metrics, .grid.two, .grid.three, .grid.uneven, .roadmap-grid, .term-grid, .zero-grid, .auth-shell { grid-template-columns: 1fr; }
+  .auth-shell { padding: 24px; }
 }
 
 @media (max-width: 640px) {
   .main { padding: 18px; }
-  .topbar, .admin-header { display: grid; }
+  .topbar, .admin-header, .top-actions { display: grid; justify-items: start; }
   nav { grid-template-columns: 1fr; }
   .skill-row { grid-template-columns: 1fr; }
   .mini-roadmap div { grid-template-columns: 1fr; }
+  .auth-intro h1 { font-size: 34px; }
 }

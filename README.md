@@ -6,6 +6,9 @@
 
 ## Features
 
+- `Register / 新會員註冊`
+- `Login / Logout / 登入登出`
+- `Tenant Workspace / 多租戶工作區`
 - `Teaching Mode / 教學模式`
 - `Scenario Input / 情境輸入`
 - `Interactive Mode / 互動模式`
@@ -66,6 +69,28 @@ The app uses port `4321` to avoid common conflicts with TicketFactory:
 email: admin@example.com
 password: password123
 ```
+
+## Student Demo Account
+
+```text
+email: john@example.com
+password: password123
+```
+
+## Learning Flow
+
+1. Register a new member and create a new tenant workspace.
+2. Use `從0開始 / Start from Zero` to complete the first five setup steps:
+   - Project Audit
+   - Local Run
+   - Production Image
+   - AWS Target Architecture
+   - First Deploy
+3. Continue into the 30-day roadmap.
+4. Mark lessons complete and review `Learning Progress`.
+5. Open `Quiz Mode` and submit answers.
+6. Switch tenants from the sidebar to see tenant-scoped progress.
+7. Open `Admin` to view tenant management and member management.
 
 ## Build
 

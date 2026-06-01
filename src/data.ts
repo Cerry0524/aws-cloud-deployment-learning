@@ -265,3 +265,72 @@ export const members = [
   { name: "陳雅婷", email: "yating@example.com", status: "Active", progress: 12, day: 4, score: 61 },
   { name: "林志明", email: "zhiming@example.com", status: "Paused", progress: 0, day: 1, score: 0 }
 ];
+
+export const zeroStartSteps = [
+  {
+    id: "repo-audit",
+    title: "Step 1: 專案盤點 / Project Audit",
+    body: "先列出你的 Docker Compose services、ports、volumes、env files，建立 deployment inventory。",
+    output: "產出 services-to-AWS mapping table"
+  },
+  {
+    id: "local-run",
+    title: "Step 2: 本機啟動 / Local Run",
+    body: "確認專案可以在不衝突的 ports 上啟動，並驗證 frontend、backend、database、queue。",
+    output: "產出 local readiness checklist"
+  },
+  {
+    id: "production-image",
+    title: "Step 3: Production Image",
+    body: "把 dev bind mount 改成 production image packaging，Laravel 要 COPY source 並執行 composer install。",
+    output: "產出 Dockerfile production checklist"
+  },
+  {
+    id: "aws-target",
+    title: "Step 4: AWS Target Architecture",
+    body: "選擇 EC2 first 或 ECS Fargate main path，並決定 RDS、S3、ElastiCache、CloudWatch 的使用方式。",
+    output: "產出 AWS architecture diagram"
+  },
+  {
+    id: "first-deploy",
+    title: "Step 5: 第一次部署 / First Deploy",
+    body: "先讓一個 health endpoint 通過，再逐步接上 database、queue、storage、domain、CI/CD。",
+    output: "產出 deployment runbook"
+  }
+];
+
+export const seedTenants = [
+  {
+    id: "tenant-ticketfactory",
+    name: "TicketFactory 團隊",
+    plan: "Team",
+    domain: "ticketfactory.local",
+    members: 3
+  },
+  {
+    id: "tenant-cerry-lab",
+    name: "Cerry AWS Lab",
+    plan: "Solo",
+    domain: "cerry-lab.local",
+    members: 1
+  }
+];
+
+export const seedUsers = [
+  {
+    id: "user-admin",
+    name: "Admin Demo",
+    email: "admin@example.com",
+    password: "password123",
+    role: "admin",
+    tenantId: "tenant-ticketfactory"
+  },
+  {
+    id: "user-student",
+    name: "John Smith",
+    email: "john@example.com",
+    password: "password123",
+    role: "student",
+    tenantId: "tenant-ticketfactory"
+  }
+];
