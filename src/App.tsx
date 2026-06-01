@@ -635,7 +635,7 @@ function App() {
           </select>
           <small>{activeTenant.plan} plan · {activeTenant.domain}</small>
         </div>
-        <nav>
+        <nav className="app-nav" aria-label="Primary navigation">
           {navItems.map(([id, Icon, zh, en]) => (
             <button key={id} className={activeNavView === id ? "active" : ""} onClick={() => setView(id)}>
               <Icon size={18} />
@@ -2282,10 +2282,10 @@ function DeploymentInventoryTable() {
           <tbody>
             {rows.map((row, index) => (
               <tr key={row[0]}>
-                <td><strong>{row[0]}</strong><small>#{index + 1}</small></td>
-                <td><label><input type="checkbox" /> {row[1]}</label></td>
-                <td>{row[2]}</td>
-                <td><select defaultValue="pending"><option value="pending">待確認</option><option value="done">已確認</option></select></td>
+                <td data-label="Local component"><strong>{row[0]}</strong><small>#{index + 1}</small></td>
+                <td data-label="要檢查什麼"><label><input type="checkbox" /> {row[1]}</label></td>
+                <td data-label="AWS 方向">{row[2]}</td>
+                <td data-label="狀態"><select defaultValue="pending"><option value="pending">待確認</option><option value="done">已確認</option></select></td>
               </tr>
             ))}
           </tbody>

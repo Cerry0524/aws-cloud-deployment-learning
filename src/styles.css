@@ -28,6 +28,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
   background:
     linear-gradient(135deg, #f3f8ff 0%, #fff7fb 48%, #fffaf0 100%);
 }
@@ -1036,4 +1037,550 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   .visual-arrow svg { transform: rotate(90deg); }
   .split-source { border-right: 0; border-bottom: 2px dashed #fdba74; padding-right: 0; padding-bottom: 14px; }
   .compose-stack { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --mobile-shell-top: 112px;
+    --mobile-bottom-safe: 20px;
+  }
+
+  .app {
+    display: block;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+    height: auto;
+    max-height: none;
+    overflow: hidden;
+    overscroll-behavior: auto;
+    padding: 10px 12px 9px;
+    gap: 10px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(169, 187, 209, 0.65);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 12px 30px rgba(38, 72, 122, 0.1);
+  }
+
+  .brand {
+    min-height: 42px;
+    justify-content: space-between;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .brand strong {
+    font-size: 16px;
+  }
+
+  .brand span {
+    font-size: 11px;
+  }
+
+  .tenant-switcher {
+    display: none;
+  }
+
+  .app-nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 2px 5px;
+    margin: 0 -2px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-nav::-webkit-scrollbar,
+  .lesson-stepper::-webkit-scrollbar,
+  .lesson-tab-list::-webkit-scrollbar,
+  .evidence-heatmap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-nav button {
+    flex: 0 0 auto;
+    min-width: max-content;
+    min-height: 46px;
+    padding: 9px 12px;
+    border-radius: 999px;
+    border-color: #dce8f5;
+    background: #fff;
+    scroll-snap-align: start;
+    box-shadow: 0 6px 16px rgba(38, 72, 122, 0.055);
+  }
+
+  .app-nav button svg {
+    flex: 0 0 auto;
+  }
+
+  .app-nav button span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    white-space: nowrap;
+  }
+
+  .app-nav button small {
+    display: none;
+  }
+
+  .app-nav button.active {
+    color: #ffffff;
+    border-color: transparent;
+    background: linear-gradient(135deg, #00a987, #2f7df6);
+    box-shadow: 0 10px 22px rgba(47, 125, 246, 0.22);
+  }
+
+  .app-nav button.active svg {
+    color: #ffffff;
+  }
+
+  .main {
+    padding: 12px 12px calc(28px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    position: static;
+    top: auto;
+    display: grid;
+    gap: 12px;
+    align-items: start;
+    padding: 13px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+  }
+
+  .topbar h1,
+  .section-header h2 {
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  .topbar p,
+  .section-header p {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .top-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .user-chip {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .top-actions .secondary {
+    min-height: 44px;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metric {
+    min-height: 104px;
+    padding: 14px;
+  }
+
+  .metric-icon {
+    width: 34px;
+    height: 34px;
+    right: 12px;
+    top: 12px;
+  }
+
+  .metric strong {
+    font-size: 23px;
+  }
+
+  .panel {
+    padding: 15px;
+  }
+
+  .lesson-workspace,
+  .lesson-support-grid,
+  .mission-grid,
+  .lab-remediation-grid,
+  .weakness-grid,
+  .quiz-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-main-flow {
+    gap: 12px;
+  }
+
+  .lesson-meta {
+    gap: 8px;
+  }
+
+  .lesson-meta span {
+    padding: 7px 9px;
+    font-size: 12px;
+  }
+
+  .lesson-stepper {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    margin: 0 -12px;
+    padding: 0 12px 4px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lesson-stepper button {
+    flex: 0 0 150px;
+    min-height: 52px;
+    grid-template-columns: 26px minmax(0, 1fr);
+    padding: 10px;
+    scroll-snap-align: start;
+  }
+
+  .lesson-stepper span {
+    width: 26px;
+    height: 26px;
+  }
+
+  .lesson-stepper strong {
+    font-size: 12px;
+  }
+
+  .lesson-tab-shell {
+    border-radius: 10px;
+    overflow: visible;
+  }
+
+  .lesson-tab-list {
+    position: sticky;
+    top: var(--mobile-shell-top);
+    z-index: 50;
+    display: flex;
+    grid-template-columns: none;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0;
+    padding: 8px;
+    border-radius: 10px 10px 0 0;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lesson-tab-list button {
+    flex: 0 0 auto;
+    min-width: 104px;
+    min-height: 44px;
+    padding: 8px 10px;
+    align-content: center;
+    scroll-snap-align: start;
+  }
+
+  .lesson-tab-list button strong {
+    font-size: 14px;
+  }
+
+  .lesson-tab-list button span {
+    display: none;
+  }
+
+  .lesson-tab-list button.active {
+    box-shadow: inset 0 -4px 0 #00a987, 0 8px 18px rgba(38, 72, 122, 0.08);
+  }
+
+  .lesson-tab-panel {
+    padding: 12px;
+  }
+
+  .course-visual,
+  .diagram-identity,
+  .diagram-meta {
+    padding: 12px;
+  }
+
+  .diagram-legend {
+    justify-content: start;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin: 0 0 10px;
+  }
+
+  .mentor-rail {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+    z-index: auto;
+    padding: 13px;
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.07);
+  }
+
+  .mentor-panel-header strong {
+    font-size: 17px;
+  }
+
+  .mentor-section,
+  .mentor-step-meta,
+  .mentor-answer {
+    padding: 11px;
+  }
+
+  .mentor-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    position: sticky;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 45;
+    padding: 8px;
+    border: 1px solid #dce8f5;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 14px 28px rgba(38, 72, 122, 0.16);
+  }
+
+  .mentor-actions button {
+    min-height: 44px;
+    padding: 9px 8px;
+  }
+
+  .evidence-heatmap {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .evidence-day {
+    flex: 0 0 76px;
+    min-height: 78px;
+    scroll-snap-align: start;
+  }
+
+  .skill-radar-grid,
+  .exam-mapping-grid,
+  .capstone-grid,
+  .assessment-stage-grid,
+  .rubric-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --mobile-shell-top: 108px;
+  }
+
+  .main {
+    padding: 10px 10px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .top-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric span,
+  .metric small {
+    max-width: calc(100% - 38px);
+    font-size: 12px;
+  }
+
+  .primary,
+  .secondary,
+  .row-button,
+  .context-link,
+  .first-action {
+    min-height: 44px;
+  }
+
+  .mapping-diagram {
+    display: grid;
+    grid-template-columns: 1fr;
+    border-left: 0;
+    padding-left: 0;
+    gap: 10px;
+  }
+
+  .diagram-column-title {
+    display: none;
+  }
+
+  .mapping-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--diagram-line);
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, var(--diagram-soft) 100%);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+  }
+
+  .mapping-node {
+    min-height: auto;
+    width: 100%;
+    padding: 12px;
+  }
+
+  .mapping-badge {
+    margin-left: 0;
+    margin-bottom: 4px;
+  }
+
+  .aws-service-stack {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+  }
+
+  .mapping-arrow {
+    min-height: 44px;
+  }
+
+  .mapping-arrow::before {
+    left: 50%;
+    right: auto;
+    top: 0;
+    bottom: 0;
+    border-top: 0;
+    border-left: 2px dashed var(--diagram-line);
+    transform: none;
+  }
+
+  .mapping-arrow span,
+  .mapping-arrow svg {
+    background: #ffffff;
+    border: 1px solid var(--diagram-line);
+  }
+
+  .service-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .aws-service-badge {
+    width: 40px;
+    height: 40px;
+  }
+
+  .visual-node {
+    grid-template-columns: 38px minmax(0, 1fr);
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .visual-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .inventory-table-wrap {
+    overflow: visible;
+  }
+
+  .inventory-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 10px;
+  }
+
+  .inventory-table,
+  .inventory-table thead,
+  .inventory-table tbody,
+  .inventory-table tr,
+  .inventory-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .inventory-table thead {
+    display: none;
+  }
+
+  .inventory-table tr {
+    border: 1px solid #dfe7f2;
+    border-radius: 12px;
+    background: #fff;
+    padding: 10px 12px;
+    box-shadow: 0 8px 18px rgba(38, 72, 122, 0.055);
+  }
+
+  .inventory-table td {
+    border-bottom: 0;
+    padding: 9px 0;
+  }
+
+  .inventory-table td + td {
+    border-top: 1px solid #edf1f6;
+  }
+
+  .inventory-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 5px;
+    color: #637084;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .inventory-table td label {
+    align-items: start;
+  }
+
+  .inventory-table select {
+    min-height: 44px;
+  }
+
+  .quiz-filter-grid {
+    gap: 10px;
+  }
+
+  .segmented {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .segmented button {
+    flex: 0 0 auto;
+    min-height: 42px;
+  }
+}
+
+@media (max-width: 380px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .app-nav button {
+    padding-inline: 10px;
+  }
+
+  .lesson-stepper button {
+    flex-basis: 136px;
+  }
 }
