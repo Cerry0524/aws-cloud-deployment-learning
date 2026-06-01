@@ -628,6 +628,21 @@ function App() {
             <span>AWS Docker Lab</span>
           </div>
         </div>
+        <div className="mobile-shell-actions" aria-label="Mobile tenant and account controls">
+          <label className="mobile-tenant-select">
+            <span>租戶</span>
+            <select value={activeTenant.id} onChange={(event) => switchTenant(event.target.value)}>
+              {store.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
+            </select>
+          </label>
+          <div className="mobile-account-chip">
+            <span className="mobile-avatar">{activeUser.name.slice(0, 2).toUpperCase()}</span>
+            <strong>{activeUser.name}</strong>
+            <button type="button" onClick={signOut} aria-label="Logout">
+              <LogOut size={15} />
+            </button>
+          </div>
+        </div>
         <div className="tenant-switcher">
           <label>Tenant / 租戶</label>
           <select value={activeTenant.id} onChange={(event) => switchTenant(event.target.value)}>

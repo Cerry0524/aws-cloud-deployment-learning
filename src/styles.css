@@ -53,6 +53,7 @@ button, input, select { font: inherit; }
 .brand-mark { width: 42px; height: 42px; border-radius: 8px; display: grid; place-items: center; color: #ffffff; background: linear-gradient(135deg, #00a987, #2f7df6); box-shadow: 0 12px 24px rgba(0, 169, 135, 0.22); }
 .brand strong { display: block; font-size: 18px; }
 .brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.mobile-shell-actions { display: none; }
 nav { display: grid; gap: 8px; }
 nav button { border: 1px solid transparent; background: transparent; display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; color: #526071; cursor: pointer; text-align: left; }
 nav button span { display: grid; gap: 2px; }
@@ -1041,7 +1042,7 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
 @media (max-width: 900px) {
   :root {
-    --mobile-shell-top: 112px;
+    --mobile-shell-top: 176px;
     --mobile-bottom-safe: 20px;
   }
 
@@ -1068,8 +1069,8 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   }
 
   .brand {
-    min-height: 42px;
-    justify-content: space-between;
+    min-height: 40px;
+    justify-content: flex-start;
   }
 
   .brand-mark {
@@ -1084,6 +1085,87 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
   .brand span {
     font-size: 11px;
+  }
+
+  .mobile-shell-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .mobile-tenant-select,
+  .mobile-account-chip {
+    min-width: 0;
+    min-height: 42px;
+    border: 1px solid #dce8f5;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 6px 16px rgba(38, 72, 122, 0.045);
+  }
+
+  .mobile-tenant-select {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px 6px 10px;
+  }
+
+  .mobile-tenant-select span {
+    color: #06765f;
+    font-size: 12px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  .mobile-tenant-select select {
+    min-height: 30px;
+    padding: 5px 28px 5px 8px;
+    border: 0;
+    color: #172033;
+    font-weight: 800;
+    background: transparent;
+  }
+
+  .mobile-account-chip {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 38px;
+    gap: 8px;
+    align-items: center;
+    padding: 5px;
+  }
+
+  .mobile-avatar {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: #16233a;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .mobile-account-chip strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #172033;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-account-chip button {
+    width: 34px;
+    height: 32px;
+    border: 1px solid #9af0dc;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    color: #06765f;
+    background: #e8fff8;
+    cursor: pointer;
   }
 
   .tenant-switcher {
@@ -1175,10 +1257,7 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   }
 
   .top-actions {
-    width: 100%;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
+    display: none;
   }
 
   .user-chip {
@@ -1388,7 +1467,7 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
 @media (max-width: 640px) {
   :root {
-    --mobile-shell-top: 108px;
+    --mobile-shell-top: 174px;
   }
 
   .main {
@@ -1572,6 +1651,14 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 }
 
 @media (max-width: 380px) {
+  :root {
+    --mobile-shell-top: 218px;
+  }
+
+  .mobile-shell-actions {
+    grid-template-columns: 1fr;
+  }
+
   .metrics {
     grid-template-columns: 1fr;
   }
