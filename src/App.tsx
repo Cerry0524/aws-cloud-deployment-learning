@@ -903,10 +903,12 @@ function LessonView({
                     isLastStep={stepIndex >= maxStepIndex}
                   />
                 )}
-                <details className="tab-accordion" open={lesson.day === 1}>
-                  <summary>Deployment Inventory / 部署盤點表</summary>
-                  <DeploymentInventoryTable />
-                </details>
+                {lesson.day === 1 && (
+                  <details className="tab-accordion" open>
+                    <summary>Deployment Inventory / 部署盤點表</summary>
+                    <DeploymentInventoryTable />
+                  </details>
+                )}
               </div>
             )}
 
@@ -949,6 +951,7 @@ function LessonView({
               <div className="lesson-tab-content">
                 <div className="lesson-support-grid">
                   <Panel title="Current AWS References / 當前 AWS 版本與來源提醒"><Checklist items={lesson.sourceNotes} /></Panel>
+                  <Panel title="Exam Mapping / AWS 認證能力對照"><Checklist items={lesson.examMapping} /></Panel>
                   <Panel title="Project Spec Checklist / 專案規格核對"><Checklist items={lesson.documentSpec} /></Panel>
                 </div>
               </div>

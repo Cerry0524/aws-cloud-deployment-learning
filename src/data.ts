@@ -79,7 +79,24 @@ export type Lesson = {
   acceptance: string[];
   expectedOutcome: string;
   sourceNotes: string[];
+  examMapping: string[];
   mentorScript: MentorScript;
+};
+
+type AssociateLabSpec = {
+  scenario: string;
+  whyItMatters: string;
+  todayGoal: string;
+  previousContext: string;
+  nextContext: string;
+  command: string;
+  pitfall: string;
+  documentSpec: string[];
+  steps: string[];
+  acceptance: string[];
+  examMapping: string[];
+  deliverables: string[];
+  quickQuestions: MentorQuestion[];
 };
 
 const deploymentTopics = [
@@ -139,12 +156,638 @@ const minutesForDay = (day: number) => {
   return "60-90 min";
 };
 
+const associateLabSpecs: Record<number, AssociateLabSpec> = {
+  6: {
+    scenario:
+      "Day 5 已經把資料責任拆到 RDS、S3、ElastiCache 草圖。今天要先畫出 network boundary：ALB 在 public subnet，Laravel/ECS task 在 private subnet，RDS 與 Redis 只接受 app security group。",
+    whyItMatters:
+      "VPC 不是雲端版本的資料夾，而是流量、隔離、路由與安全邊界。VPC 畫錯，後面 ECS、RDS、ALB、CloudFront 都會被迫用危險的公開設定補洞。",
+    todayGoal:
+      "產出 public/private subnet diagram、route table note 與 security group matrix。",
+    previousContext:
+      "Day 5 已經決定 DB、uploads、Redis 要抽離；今天決定它們放在哪個 network boundary 裡。",
+    nextContext:
+      "Day 7 會建立 ECR image repository；有了 network 邊界後，後續 ECS service 才知道要部署到哪些 subnet。",
+    command:
+      "aws ec2 describe-vpcs\naws ec2 describe-subnets --filters Name=vpc-id,Values=<vpc-id>\naws ec2 describe-route-tables --filters Name=vpc-id,Values=<vpc-id>\naws ec2 describe-security-groups --group-ids <alb-sg> <app-sg> <db-sg>",
+    pitfall:
+      "不要把 private subnet 畫完又讓 RDS public accessible；路由表、NAT、security group、public IP 必須一起檢查。",
+    documentSpec: [
+      "Public/private subnet diagram: 標出 ALB、ECS task、RDS、Redis 各自所在 subnet。",
+      "Route table note: 說明 public subnet 走 Internet Gateway，private subnet 是否需要 NAT 出網。",
+      "Security Group matrix: Browser -> ALB、ALB -> app、app -> RDS/Redis，禁止 DB/Redis 對外。",
+      "Failure note: 若 ECS task 拉不到 image 或連不到 DB，列出可能是 route、NAT、SG、DNS 哪一層。"
+    ],
+    steps: [
+      "Read: 先看懂 public subnet、private subnet、route table、security group 的角色差異。",
+      "Inspect: 對照 Day 5 stateful extraction plan，決定 RDS/Redis 不公開、app task 放 private subnet。",
+      "Implement: 畫出 Browser -> ALB -> ECS -> RDS/Redis 的 network flow，補上 route table 與 SG matrix。",
+      "Verify: 用 AWS CLI describe VPC/subnet/route-table/security-groups，確認設計能被實際資源對應。",
+      "Record: 保存 network diagram、route note、SG matrix 與故障診斷順序。"
+    ],
+    acceptance: [
+      "能說明 public subnet 與 private subnet 的差異，不只背名稱。",
+      "能畫出 ALB、ECS、RDS、Redis 的 network boundary。",
+      "Security Group matrix 只開必要來源與 port。",
+      "能指出 RDS public accessible 為什麼通常是錯誤方向。",
+      "有 route table/NAT/SG 的故障診斷 note。"
+    ],
+    examMapping: [
+      "SAA-C03: Design Secure Architectures - network boundary、least privilege access、private data layer。",
+      "SAA-C03: Design Resilient Architectures - multi-AZ subnet planning and traffic path reasoning。",
+      "CloudOps Engineer Associate (SOA-C03): Networking and Content Delivery - VPC route table、security group、subnet troubleshooting。"
+    ],
+    deliverables: [
+      "public/private subnet diagram",
+      "route table note",
+      "security group matrix",
+      "ALB -> ECS -> RDS/Redis traffic path",
+      "network troubleshooting checklist"
+    ],
+    quickQuestions: [
+      {
+        id: "why-private",
+        question: "RDS 為什麼不應該直接 public？",
+        answer: "正式環境通常讓 RDS 只接受 app security group。public DB 會把資料層暴露到網路，風險和攻擊面都變大。"
+      },
+      {
+        id: "alb-position",
+        question: "ALB 和 ECS task 要放同一種 subnet 嗎？",
+        answer: "通常 Internet-facing ALB 放 public subnet，ECS task 放 private subnet，讓外部只進 ALB，再由 ALB 轉給 app。"
+      }
+    ]
+  },
+  7: {
+    scenario:
+      "Day 6 已決定 ECS 未來會跑在 private subnet。今天要把 Day 3 的 production image 放進 ECR，並建立 commit SHA tag、release tag 與 rollback tag 表。",
+    whyItMatters:
+      "ECS 不應該依賴你本機的 image。ECR 是 image artifact 的交付中心；tag policy 決定你能不能追蹤、審查與 rollback。",
+    todayGoal:
+      "產出 ECR repository plan、commit SHA tag policy、rollback tag table。",
+    previousContext:
+      "Day 3 已做 production image，Day 6 已定義網路邊界；今天把 image 交給 AWS registry。",
+    nextContext:
+      "Day 8 會把 ECR image 放進 ECS task definition，建立第一個 Fargate web service。",
+    command:
+      "aws ecr create-repository --repository-name ticketfactory-api\naws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com\ndocker tag ticketfactory-api:<sha> <account>.dkr.ecr.<region>.amazonaws.com/ticketfactory-api:<sha>\ndocker push <account>.dkr.ecr.<region>.amazonaws.com/ticketfactory-api:<sha>\naws ecr describe-images --repository-name ticketfactory-api",
+    pitfall:
+      "不要只推 latest；latest 會移動，出事時很難知道 ECS 目前跑的 image 是否就是你以為的那一版。",
+    documentSpec: [
+      "ECR repository plan: repository name、region、lifecycle policy、scan on push 策略。",
+      "Image tag policy: commit SHA 為不可變部署 tag，release tag 只作為人類可讀標記。",
+      "Rollback tag table: current、previous、candidate 三欄，標出 ECS task definition revision。",
+      "Security note: GitHub Actions 使用 OIDC/role，不把 long-lived AWS key 寫進 repo secret。"
+    ],
+    steps: [
+      "Read: 先理解 ECR 在部署鏈中的位置：保存可被 ECS 拉取的 image artifact。",
+      "Inspect: 檢查 Day 3 image tag 是否可追蹤到 commit SHA，並確認 repository 命名規則。",
+      "Implement: 建立 ECR repository、login、tag、push，保存 image digest。",
+      "Verify: 用 aws ecr describe-images 確認 tag、digest、pushedAt 都存在。",
+      "Record: 建立 rollback tag table，標記 current/previous image 與對應 task definition。"
+    ],
+    acceptance: [
+      "能說明 tag 與 digest 的差異。",
+      "ECR repository plan 包含 region、命名、lifecycle、掃描策略。",
+      "image 使用 commit SHA tag，不只依賴 latest。",
+      "能用 describe-images 驗證 image 已存在。",
+      "有 rollback tag table 可供 Day 8/14 使用。"
+    ],
+    examMapping: [
+      "DVA-C02: Deployment - container image versioning、deployment artifact traceability。",
+      "DVA-C02: Security - IAM/OIDC access to AWS services from CI。",
+      "CloudOps Engineer Associate (SOA-C03): Deployment and provisioning - release artifact governance。"
+    ],
+    deliverables: [
+      "ECR repository plan",
+      "commit SHA tag policy",
+      "image digest evidence",
+      "rollback tag table",
+      "CI credential risk note"
+    ],
+    quickQuestions: [
+      {
+        id: "tag-vs-digest",
+        question: "tag 和 digest 差在哪？",
+        answer: "tag 是可讀標籤，可能被移動；digest 指向 image content，比較適合做不可變追蹤與審查。"
+      },
+      {
+        id: "why-ecr",
+        question: "為什麼 ECS 需要 ECR？",
+        answer: "ECS 需要從可存取的 registry 拉 image。ECR 提供 AWS 內建 IAM、區域、掃描與 lifecycle 管理。"
+      }
+    ]
+  },
+  8: {
+    scenario:
+      "EC2 compose 可以跑，但主機維運與單機風險開始變重。今天把 Laravel web runtime 轉成 ECS Fargate service，讓 compute 變成 task definition、service、log group、desired count。",
+    whyItMatters:
+      "ECS Fargate 是從 Docker Compose 走向 AWS managed container 的核心轉折。你要理解 image、CPU/memory、env/secrets、port mapping、log driver 與 service desired count 如何組成一個可維運 web runtime。",
+    todayGoal:
+      "產出 task definition sketch、service boundary diagram、CloudWatch log group mapping、rollback revision note。",
+    previousContext:
+      "Day 7 已把 image 放進 ECR；今天把 image 放到 ECS task definition 並建立 web service。",
+    nextContext:
+      "Day 9 會把 ECS service 接到 ALB health check，驗證從使用者入口進來是否健康。",
+    command:
+      "aws ecs describe-clusters\naws ecs register-task-definition --cli-input-json file://task-definition.json\naws ecs create-service --cluster ticketfactory --service-name web --task-definition ticketfactory-web --desired-count 2\naws ecs describe-services --cluster ticketfactory --services web\naws logs tail /ecs/ticketfactory-web --follow",
+    pitfall:
+      "不要把 web、worker、scheduler 全塞同一個 ECS service；它們的擴展、restart、health check、部署節奏都不同。",
+    documentSpec: [
+      "Task definition sketch: image、CPU/memory、port mapping、environment、secrets、logConfiguration。",
+      "Service boundary diagram: web service、desired count、subnet、security group、target group attachment。",
+      "Log group mapping: /ecs/ticketfactory-web 對應 container name 與 stream prefix。",
+      "Rollback revision note: 記錄目前 task definition revision 與上一版 revision。"
+    ],
+    steps: [
+      "Read: 先把 Docker Compose service 對應到 ECS task definition 與 ECS service。",
+      "Inspect: 檢查 image URI、container port、env、secret、log group 是否齊全。",
+      "Implement: register task definition，create service，desired count 先設 2 以練習 service health。",
+      "Verify: describe-services 檢查 runningCount、desiredCount、deployment status，並 tail CloudWatch logs。",
+      "Record: 保存 service boundary diagram、log mapping 與 rollback task revision。"
+    ],
+    acceptance: [
+      "能分辨 task definition、task、service、cluster 的角色。",
+      "task definition sketch 包含 image、port、env/secrets、logs。",
+      "web service 與 worker/scheduler 邊界沒有混在一起。",
+      "能用 describe-services 和 logs tail 驗證 ECS service。",
+      "有 rollback task definition revision note。"
+    ],
+    examMapping: [
+      "SAA-C03: Design High-Performing Architectures - managed container service and scaling boundary。",
+      "SAA-C03: Design Resilient Architectures - desired count、multi-AZ placement、service recovery。",
+      "CloudOps Engineer Associate (SOA-C03): Monitoring and deployment operations - ECS service status and logs。"
+    ],
+    deliverables: [
+      "task definition sketch",
+      "ECS service boundary diagram",
+      "CloudWatch log group mapping",
+      "service status evidence",
+      "rollback task definition revision note"
+    ],
+    quickQuestions: [
+      {
+        id: "task-vs-service",
+        question: "task definition 和 service 差在哪？",
+        answer: "task definition 是 container 執行規格；service 負責讓指定數量的 task 持續運作、部署新版本與接 ALB。"
+      },
+      {
+        id: "why-log-group",
+        question: "為什麼 Day 8 就要規劃 logs？",
+        answer: "ECS 啟動失敗時，CloudWatch logs 是第一個診斷入口。沒有 log mapping，服務壞了只會看到 stopped task。"
+      }
+    ]
+  },
+  9: {
+    scenario:
+      "ECS service 可以啟動，但使用者不是直接打 task IP，而是經過 ALB。今天要建立 /health readiness endpoint、target group health check table 與 502/unhealthy 診斷矩陣。",
+    whyItMatters:
+      "很多 AWS 初學者看到 ECS running 就以為部署成功，但 ALB target unhealthy 時使用者仍然打不進來。ALB 是外部可用性的第一道真相。",
+    todayGoal:
+      "產出 target group health check table、failure diagnosis matrix、ALB traffic path note。",
+    previousContext:
+      "Day 8 已建立 ECS Fargate web service；今天把 service 和 ALB target group 接起來驗證。",
+    nextContext:
+      "Day 10 會把 queue worker 和 scheduler 從 web runtime 拆出來，避免健康檢查與背景工作互相干擾。",
+    command:
+      "aws elbv2 describe-target-groups --names ticketfactory-web\naws elbv2 describe-target-health --target-group-arn <target-group-arn>\ncurl -I http://<alb-dns-name>/health\naws ecs describe-services --cluster ticketfactory --services web",
+    pitfall:
+      "ALB 502 不一定是 ALB 壞；常見原因是 container port、health path、security group、app listen address 或 Laravel 回 500。",
+    documentSpec: [
+      "Target group health check table: path、port、matcher、interval、healthy/unhealthy threshold。",
+      "Failure diagnosis matrix: 502、503、unhealthy、timeout、redirect loop 對應診斷指令。",
+      "Traffic path note: Browser -> ALB listener -> target group -> ECS task -> Laravel /health。",
+      "Recovery note: health check path 修正、SG rule 修正、rollback target/task revision。"
+    ],
+    steps: [
+      "Read: 先理解 ALB listener、target group、health check、ECS service attachment 的關係。",
+      "Inspect: 檢查 Laravel /health 是否不依賴登入、不 redirect、不過度檢查外部服務。",
+      "Implement: 設定 target group health check，確認 ALB SG 能到 app SG 的 container port。",
+      "Verify: describe-target-health + curl ALB /health，交叉確認 target 狀態與 HTTP status。",
+      "Record: 完成 failure diagnosis matrix 與 recovery note。"
+    ],
+    acceptance: [
+      "能說明 ECS task running 不等於 ALB 可用。",
+      "target group health check table 有 path、port、matcher、threshold。",
+      "能從 502/503/unhealthy 判斷下一個檢查點。",
+      "能用 describe-target-health 和 curl /health 驗證。",
+      "有 health check rollback/recovery note。"
+    ],
+    examMapping: [
+      "SAA-C03: Design Resilient Architectures - load balancing, health checks, failure isolation。",
+      "SAA-C03: Design Secure Architectures - security group path from ALB to app。",
+      "CloudOps Engineer Associate (SOA-C03): Monitoring and troubleshooting - target health diagnostics。"
+    ],
+    deliverables: [
+      "target group health check table",
+      "ALB traffic path note",
+      "failure diagnosis matrix",
+      "curl health evidence",
+      "target recovery note"
+    ],
+    quickQuestions: [
+      {
+        id: "running-vs-healthy",
+        question: "ECS running 和 ALB healthy 差在哪？",
+        answer: "running 代表 task process 還活著；ALB healthy 代表 ALB 能從指定 path/port 得到符合 matcher 的回應。"
+      },
+      {
+        id: "health-path",
+        question: "/health 要避免什麼？",
+        answer: "避免需要登入、redirect、太慢或過度依賴非必要外部服務。它應該穩定反映 app readiness。"
+      }
+    ]
+  },
+  10: {
+    scenario:
+      "Web service 已能接 ALB，但 Laravel queue worker、scheduler 不能永遠躲在 web container 裡。今天要把 web、worker、scheduler 拆成三種 ECS runtime。",
+    whyItMatters:
+      "Web request、queue job、scheduled command 的生命週期不同。混在一起會讓部署、擴展、健康檢查、重啟策略全部變得模糊。",
+    todayGoal:
+      "產出 web/worker/scheduler split diagram、restart strategy、queue failure recovery note。",
+    previousContext:
+      "Day 9 已讓 web service 通過 ALB health check；今天處理背景工作與排程。",
+    nextContext:
+      "Day 11 會處理 APP_KEY、DB_PASSWORD、Redis password 等 secrets/config 分類，讓三種 runtime 都能安全取用設定。",
+    command:
+      "aws ecs create-service --cluster ticketfactory --service-name worker --task-definition ticketfactory-worker --desired-count 1\naws ecs create-service --cluster ticketfactory --service-name scheduler --task-definition ticketfactory-scheduler --desired-count 1\naws ecs describe-services --cluster ticketfactory --services web worker scheduler\naws logs tail /ecs/ticketfactory-worker --follow",
+    pitfall:
+      "不要讓 scheduler 在多個 task 同時跑同一個 cron；重複排程可能造成重複寄信、重複扣款或重複派 job。",
+    documentSpec: [
+      "Runtime split diagram: web、worker、scheduler 各自的 command、desired count、health/restart 策略。",
+      "Queue strategy note: queue connection、retry、timeout、dead letter 或 failed_jobs 處理方式。",
+      "Scheduler strategy note: desired count、single runner、避免多重排程的機制。",
+      "Recovery note: worker 卡住、job retry storm、scheduler 重複執行時的處置。"
+    ],
+    steps: [
+      "Read: 先分辨 web request、queue worker、scheduler command 的生命週期。",
+      "Inspect: 對照 Laravel queue connection、Horizon/supervisor 設定、schedule:run command。",
+      "Implement: 草擬 worker task definition 與 scheduler task/service，分開 desired count 與 command。",
+      "Verify: describe-services 檢查 web/worker/scheduler，並查看 worker logs 是否處理 job。",
+      "Record: 完成 runtime split diagram、restart strategy 與 recovery note。"
+    ],
+    acceptance: [
+      "能說明 web、worker、scheduler 為什麼要分開。",
+      "runtime split diagram 有 command、desired count、restart/health 策略。",
+      "能指出 scheduler 多副本的風險。",
+      "能用 describe-services/logs 驗證 worker 狀態。",
+      "有 queue failure 與 scheduler duplication recovery note。"
+    ],
+    examMapping: [
+      "DVA-C02: Development with AWS Services - asynchronous workloads and application runtime separation。",
+      "DVA-C02: Troubleshooting and Optimization - failed job, retry, log-driven diagnosis。",
+      "CloudOps Engineer Associate (SOA-C03): Deployment operations - service restart and scaling strategy。"
+    ],
+    deliverables: [
+      "web/worker/scheduler split diagram",
+      "worker task command note",
+      "scheduler single-runner strategy",
+      "queue failure recovery note",
+      "runtime scaling boundary"
+    ],
+    quickQuestions: [
+      {
+        id: "why-worker-service",
+        question: "worker 為什麼不能塞在 web service？",
+        answer: "worker 和 web 的擴展、重啟、log、health check 不同。拆開後才能獨立調整 desired count 與排錯。"
+      },
+      {
+        id: "scheduler-risk",
+        question: "scheduler 最大風險是什麼？",
+        answer: "多個副本同時執行同一批排程，造成重複動作。要設計 single runner 或 distributed lock。"
+      }
+    ]
+  },
+  11: {
+    scenario:
+      "ECS web/worker/scheduler 都需要 APP_KEY、DB_HOST、DB_PASSWORD、REDIS_HOST、API_URL，但不是所有設定都一樣敏感。今天要把 secret 和 config 分類，接到 Secrets Manager 或 SSM Parameter Store。",
+    whyItMatters:
+      "把 APP_KEY、DB password、token 打包進 image 或 commit 到 repo，是部署系統最容易留下的長期風險。Secret 管理要和 IAM task role、execution role、task definition 一起看。",
+    todayGoal:
+      "產出 secret/config classification、task definition secrets mapping、IAM role access note。",
+    previousContext:
+      "Day 10 已把 runtime 拆成 web、worker、scheduler；今天讓不同 runtime 安全取得設定與秘密。",
+    nextContext:
+      "Day 12 會發布 React frontend，處理 public config、API URL、CORS 與 CloudFront cache。",
+    command:
+      "aws secretsmanager list-secrets\naws ssm describe-parameters\naws ecs describe-task-definition --task-definition ticketfactory-web\naws iam get-role --role-name ecsTaskExecutionRole",
+    pitfall:
+      "不要把所有 env 都當 secret，也不要把 secret 當普通 env；分類錯會造成權限過大、輪替困難或敏感資料進 logs。",
+    documentSpec: [
+      "Secret/config classification: secret、sensitive config、public runtime config 三類。",
+      "Task definition secrets mapping: APP_KEY、DB_PASSWORD、REDIS_PASSWORD 對應 Secrets Manager/SSM ARN。",
+      "IAM access note: execution role 與 task role 的責任差異與最小權限。",
+      "Rotation/recovery note: secret 輪替後如何 redeploy task 並驗證連線。"
+    ],
+    steps: [
+      "Read: 先分辨 secret、sensitive config、public config。",
+      "Inspect: 檢查 Laravel .env、React build env、ECS task definition environment/secrets 欄位。",
+      "Implement: 草擬 Secrets Manager/SSM parameter 命名與 task definition secrets mapping。",
+      "Verify: 用 describe-task-definition 檢查 secret reference，不在 logs 或 image 裡暴露值。",
+      "Record: 寫出 IAM role access note 與 rotation recovery note。"
+    ],
+    acceptance: [
+      "能分辨 APP_KEY、DB_PASSWORD、API_URL 分別屬於哪一類設定。",
+      "task definition secrets mapping 不包含明文 secret。",
+      "能說明 execution role 與 task role 的差異。",
+      "能驗證 image/repo/logs 沒有 secret 值。",
+      "有 secret rotation 後 redeploy/recovery note。"
+    ],
+    examMapping: [
+      "DVA-C02: Security - use Secrets Manager/SSM and IAM roles in application deployments。",
+      "DVA-C02: Deployment - task definition configuration and environment handling。",
+      "Security intro: least privilege, secret rotation, avoiding hardcoded credentials。"
+    ],
+    deliverables: [
+      "secret/config classification",
+      "task definition secrets mapping",
+      "IAM role access note",
+      "secret exposure checklist",
+      "rotation recovery note"
+    ],
+    quickQuestions: [
+      {
+        id: "secret-or-config",
+        question: "API URL 是 secret 嗎？",
+        answer: "通常不是。API URL 多半是 public config；DB_PASSWORD、APP_KEY、third-party token 才是 secret。"
+      },
+      {
+        id: "role-diff",
+        question: "execution role 和 task role 差在哪？",
+        answer: "execution role 幫 ECS 拉 image、寫 logs、取 secret；task role 是 app runtime 呼叫 AWS API 時使用的權限。"
+      }
+    ]
+  },
+  12: {
+    scenario:
+      "Backend 已在 ECS 路徑上成形，今天把 React frontend 從 dev server 變成 S3 + CloudFront 靜態發布，並處理 API URL、CORS、cache invalidation。",
+    whyItMatters:
+      "React dev server 不該是 production frontend。CloudFront 會帶來快取、HTTPS、全球邊緣節點，但也會放大錯誤的 API URL、CORS 與 cache 設定。",
+    todayGoal:
+      "產出 S3/CloudFront/API URL/cache invalidation checklist。",
+    previousContext:
+      "Day 11 已分類 secret/config；今天特別處理哪些 config 可以公開進 React build。",
+    nextContext:
+      "Day 13 會把 frontend/backend build 和 deploy 串進 GitHub Actions pipeline。",
+    command:
+      "npm run build\naws s3 sync dist/ s3://<frontend-bucket> --delete\naws cloudfront create-invalidation --distribution-id <distribution-id> --paths \"/*\"\ncurl -I https://<cloudfront-domain>/",
+    pitfall:
+      "不要把 secret 放進 React build env；前端 bundle 會被使用者下載，所有 build-time env 都應視為公開。",
+    documentSpec: [
+      "Frontend delivery checklist: S3 bucket、CloudFront distribution、OAC/OAI、default root object。",
+      "API URL and CORS note: React public API URL、ALB/API domain、allowed origins。",
+      "Cache invalidation checklist: dist sync、asset hash、index.html cache policy、invalidation path。",
+      "Rollback note: 回復前一版 dist artifact 或 CloudFront origin/cache policy。"
+    ],
+    steps: [
+      "Read: 先理解 React static build、S3 object、CloudFront cache 的關係。",
+      "Inspect: 檢查 React env，確認只有 public config 進 bundle，API URL 指向正式 API domain。",
+      "Implement: build dist、sync S3、建立 CloudFront invalidation。",
+      "Verify: curl CloudFront domain，檢查 HTTP status、cache header、頁面是否呼叫正確 API。",
+      "Record: 完成 API URL/CORS/cache invalidation checklist 與 rollback note。"
+    ],
+    acceptance: [
+      "能說明 React build env 為什麼不是 secret。",
+      "frontend checklist 包含 S3、CloudFront、OAC/OAI、default root object。",
+      "API URL 與 CORS allowed origins 有明確記錄。",
+      "能用 curl / browser 驗證 CloudFront 發佈結果。",
+      "有 cache invalidation 與 rollback note。"
+    ],
+    examMapping: [
+      "SAA-C03: Design High-Performing Architectures - CloudFront caching and content delivery。",
+      "SAA-C03: Design Secure Architectures - private S3 origin with CloudFront access control。",
+      "DVA-C02: Deployment - frontend artifact build and release validation。"
+    ],
+    deliverables: [
+      "S3/CloudFront delivery checklist",
+      "public frontend config table",
+      "API URL and CORS note",
+      "cache invalidation evidence",
+      "frontend rollback note"
+    ],
+    quickQuestions: [
+      {
+        id: "frontend-secret",
+        question: "React env 可以放 secret 嗎？",
+        answer: "不可以。React build 後的 bundle 會被使用者下載，build-time env 應視為公開資訊。"
+      },
+      {
+        id: "cache-risk",
+        question: "CloudFront cache 最大雷點是什麼？",
+        answer: "index.html 被長時間 cache，導致使用者拿到舊 bundle reference。通常要搭配 asset hash 與 index.html cache policy。"
+      }
+    ]
+  },
+  13: {
+    scenario:
+      "手動部署可以學概念，但不能長期維運。今天要把 build、test、push ECR、render task definition、deploy ECS 與 migration gate 串成 GitHub Actions pipeline。",
+    whyItMatters:
+      "CI/CD 是把前面所有 artifact 串起來的地方：image tag、ECR、task definition、ECS service、migration、rollback 都要在 pipeline 中留下證據。",
+    todayGoal:
+      "產出 deployment workflow diagram、environment promotion checklist、migration gate rule、rollback command note。",
+    previousContext:
+      "Day 12 已完成 frontend delivery path；今天把 frontend/backend 發布流程制度化。",
+    nextContext:
+      "Day 14 會強化 zero downtime deployment，處理 rolling update、health gate、migration order 與 rollback。",
+    command:
+      "- uses: aws-actions/configure-aws-credentials@v4\n- uses: aws-actions/amazon-ecr-login@v2\n- uses: aws-actions/amazon-ecs-render-task-definition@v1\n- uses: aws-actions/amazon-ecs-deploy-task-definition@v2",
+    pitfall:
+      "不要讓 pipeline 一邊 deploy 一邊直接跑不可逆 migration；migration gate 要能阻擋危險變更並保留 rollback path。",
+    documentSpec: [
+      "Deployment workflow diagram: test -> build image -> push ECR -> render task definition -> deploy ECS -> verify。",
+      "Environment promotion checklist: dev/staging/prod trigger、approval、artifact promotion 規則。",
+      "Migration gate rule: backward-compatible migration、manual approval、backup checkpoint。",
+      "Rollback command note: deploy previous task definition revision、restore previous image tag、frontend artifact rollback。"
+    ],
+    steps: [
+      "Read: 先理解 GitHub Actions 在 AWS deploy path 中扮演 orchestrator，不是隨便塞 shell script。",
+      "Inspect: 檢查 repository secrets/OIDC、ECR repo、task definition template、service name、cluster name。",
+      "Implement: 草擬 workflow，串接 configure-aws-credentials、ECR login、render/deploy task definition。",
+      "Verify: 用 dry-run checklist 或 workflow log 驗證每一段 artifact 都有輸出。",
+      "Record: 寫出 migration gate、approval、rollback command note。"
+    ],
+    acceptance: [
+      "能說明 pipeline 中每一步的輸入/輸出 artifact。",
+      "使用 AWS-maintained GitHub Actions 而不是整段不可讀 shell。",
+      "image tag 來自 commit SHA 並被 render 到 task definition。",
+      "migration gate 有阻擋規則與人工確認點。",
+      "有回上一版 task definition/image/frontend artifact 的 rollback note。"
+    ],
+    examMapping: [
+      "DVA-C02: Deployment - CI/CD pipeline, deployment artifacts, application release automation。",
+      "DVA-C02: Security - OIDC/IAM role access instead of static long-lived credentials。",
+      "DevOps intro: approval gates, migration safety, release traceability。"
+    ],
+    deliverables: [
+      "deployment workflow diagram",
+      "GitHub Actions workflow sketch",
+      "environment promotion checklist",
+      "migration gate rule",
+      "rollback command note"
+    ],
+    quickQuestions: [
+      {
+        id: "why-actions",
+        question: "為什麼不用手動部署就好？",
+        answer: "手動部署難以追蹤、重複與審查。CI/CD 讓 build、push、deploy、verify、rollback 都留下紀錄。"
+      },
+      {
+        id: "migration-gate",
+        question: "migration gate 要防什麼？",
+        answer: "防止不可逆 schema change 直接進 production。要先確認 backup、相容性、approval 與 rollback path。"
+      }
+    ]
+  },
+  14: {
+    scenario:
+      "Pipeline 可以部署，但部署過程不能讓使用者一直撞到 502。今天要設計 ECS rolling update、ALB health gate、migration order、worker restart strategy 與 rollback path。",
+    whyItMatters:
+      "Zero downtime 不是一句口號，而是 capacity、health check、deployment config、migration 相容性、rollback 的組合。缺一塊就可能變成半夜救火。",
+    todayGoal:
+      "產出 rolling update decision table、migration order checklist、rollback path。",
+    previousContext:
+      "Day 13 已有 pipeline；今天讓 pipeline 的部署行為更接近 production 運維需求。",
+    nextContext:
+      "Day 15 會把 logs、metrics、alarms、dashboard 建起來，讓部署後有可觀測性與驗收標準。",
+    command:
+      "aws ecs update-service --cluster ticketfactory --service web --force-new-deployment\naws ecs wait services-stable --cluster ticketfactory --services web\naws elbv2 describe-target-health --target-group-arn <target-group-arn>\naws logs tail /ecs/ticketfactory-web --since 10m",
+    pitfall:
+      "不要把 breaking migration 和新程式同時推上線；要優先使用 expand-contract 或 backward-compatible migration。",
+    documentSpec: [
+      "Rolling update decision table: desired count、minimum healthy percent、maximum percent、health grace period。",
+      "Migration order checklist: expand schema、deploy compatible app、backfill、contract cleanup。",
+      "Worker restart strategy: draining、queue visibility timeout、failed job recovery。",
+      "Rollback path: previous task definition revision、previous image tag、migration rollback/forward fix。"
+    ],
+    steps: [
+      "Read: 先理解 zero downtime 依賴 ALB health gate 與 ECS deployment config。",
+      "Inspect: 檢查 desired count、min/max percent、health check grace period、migration 類型。",
+      "Implement: 草擬 rolling update decision table 與 migration order checklist。",
+      "Verify: update-service 後等待 services-stable，檢查 target health 與 logs。",
+      "Record: 完成 rollback path，說明哪些情況只能 forward fix。"
+    ],
+    acceptance: [
+      "能說明 desired count、minimum healthy percent、maximum percent 的影響。",
+      "migration order 使用 backward-compatible 思維。",
+      "能用 services-stable、target health、logs 驗證部署。",
+      "worker restart strategy 不會造成大量重複 job。",
+      "rollback path 明確列出 task/image/migration 的限制。"
+    ],
+    examMapping: [
+      "CloudOps Engineer Associate (SOA-C03): Deployment operations - service stability, health gates, rollback。",
+      "DVA-C02: Deployment - safe application deployment and release strategies。",
+      "DevOps intro: expand-contract migration, approval, rollback limitations。"
+    ],
+    deliverables: [
+      "rolling update decision table",
+      "migration order checklist",
+      "ALB health gate note",
+      "worker restart strategy",
+      "rollback path"
+    ],
+    quickQuestions: [
+      {
+        id: "zero-downtime",
+        question: "zero downtime 最容易誤解什麼？",
+        answer: "以為只要 ECS rolling update 就好。實際上還要搭配 health check、capacity、migration 相容性與 rollback。"
+      },
+      {
+        id: "migration-risk",
+        question: "為什麼 breaking migration 危險？",
+        answer: "新舊程式可能短時間並存。若 schema 變更不相容，舊 task 還沒退場就會開始報錯。"
+      }
+    ]
+  },
+  15: {
+    scenario:
+      "部署能跑，但沒有 logs、metrics、alarms、dashboard，就無法判斷 production 是否健康。今天建立 observability baseline，讓每次部署後都能被驗收。",
+    whyItMatters:
+      "Production readiness 不是『我打開網頁看起來可以』。你需要用 CloudWatch logs、ECS metrics、ALB 5xx、target health、queue depth、alarm 去判斷系統狀態。",
+    todayGoal:
+      "產出 log group、metric、alarm、dashboard checklist 與 post-deploy acceptance dashboard。",
+    previousContext:
+      "Day 14 已設計安全部署流程；今天補上部署後的可觀測性與告警。",
+    nextContext:
+      "Day 16 會進入安全強化，開始審查 Security Group、IAM、headers、APP_DEBUG 等 production risk。",
+    command:
+      "aws logs tail /ecs/ticketfactory-web --follow\naws cloudwatch list-metrics --namespace AWS/ECS\naws cloudwatch put-metric-alarm --alarm-name ticketfactory-5xx-rate --metric-name HTTPCode_Target_5XX_Count --namespace AWS/ApplicationELB\naws cloudwatch get-dashboard --dashboard-name ticketfactory-production",
+    pitfall:
+      "不要等出事才找 log；如果 log group、retention、metric、alarm 沒先定義，事故當下只會變成猜謎。",
+    documentSpec: [
+      "Log group checklist: web、worker、scheduler log group、retention、stream prefix。",
+      "Metric checklist: ECS CPU/memory、ALB 5xx/latency、target health、queue depth、RDS connections。",
+      "Alarm checklist: 5xx rate、unhealthy target、task stopped、queue backlog、RDS storage/connection。",
+      "Dashboard checklist: release version、service health、traffic、error、latency、queue、database。"
+    ],
+    steps: [
+      "Read: 先理解 logs、metrics、alarms、dashboard 分別回答什麼問題。",
+      "Inspect: 檢查 ECS/ALB/RDS/queue 哪些訊號最能代表 TicketFactory 健康。",
+      "Implement: 草擬 CloudWatch dashboard 與 alarm checklist，定義部署後驗收門檻。",
+      "Verify: 用 logs tail、list-metrics、get-dashboard 或 pseudo-command 檢查訊號可取得。",
+      "Record: 建立 post-deploy acceptance dashboard，讓 Day 16 以後的風險審查有依據。"
+    ],
+    acceptance: [
+      "能說明 logs、metrics、alarms、dashboard 的不同用途。",
+      "log group checklist 包含 web、worker、scheduler 與 retention。",
+      "metrics 不只看 CPU，也包含 ALB、queue、RDS、target health。",
+      "alarm checklist 有實際事件與處置方向。",
+      "有 post-deploy acceptance dashboard 可供後續課程使用。"
+    ],
+    examMapping: [
+      "CloudOps Engineer Associate (SOA-C03): Monitoring and incident response - CloudWatch logs, metrics, alarms, dashboards。",
+      "SAA-C03: Design Resilient Architectures - observability for availability and failure response。",
+      "DVA-C02: Troubleshooting and Optimization - log/metric based application diagnosis。"
+    ],
+    deliverables: [
+      "CloudWatch log group checklist",
+      "metric and alarm checklist",
+      "post-deploy dashboard sketch",
+      "deployment acceptance thresholds",
+      "incident triage note"
+    ],
+    quickQuestions: [
+      {
+        id: "log-vs-metric",
+        question: "log 和 metric 差在哪？",
+        answer: "log 幫你看事件細節；metric 幫你看趨勢與門檻。告警通常依賴 metric，調查細節才回到 log。"
+      },
+      {
+        id: "dashboard-scope",
+        question: "dashboard 要放什麼？",
+        answer: "放能回答 production 是否健康的訊號：traffic、error、latency、target health、ECS resource、queue、database。"
+      }
+    ]
+  }
+};
+
+const buildAssociateGuidedSteps = (spec: AssociateLabSpec): MentorStep[] => {
+  const questions = [
+    "今天這個 artifact 之後會被哪一天使用？",
+    "如果這一步失敗，你下一個檢查點是哪一層？",
+    "這份表格或圖能不能讓另一位工程師接手？",
+    "你如何證明這不是只停留在概念？",
+    "如果要 rollback，哪個 artifact 會幫你回到上一版？"
+  ];
+
+  return spec.steps.map((step, index) => {
+    const [rawTitle, ...instructionParts] = step.split(": ");
+    return {
+      id: rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      title: rawTitle,
+      instruction: instructionParts.join(": ") || step,
+      expectedResult: spec.documentSpec[index] ?? spec.deliverables[index] ?? spec.todayGoal,
+      commonMistake: index === 0 ? spec.pitfall : `只完成操作，沒有留下 ${spec.deliverables[Math.min(index, spec.deliverables.length - 1)]}。`,
+      mentorQuestion: questions[index] ?? questions[0]
+    };
+  });
+};
+
 const commandForDay = (day: number, titleEn: string) => {
   if (day === 1) return "docker-compose config --services\nlsof -nP -iTCP -sTCP:LISTEN";
   if (day === 2) return "docker compose config\ndocker compose --env-file .env.production.local up -d\ndocker compose ps\ncurl -I http://localhost:18080/health\ndocker compose logs --tail=80 api";
   if (day === 3) return "docker build -t ticketfactory-api:$(git rev-parse --short HEAD) .\ndocker run --rm ticketfactory-api:$(git rev-parse --short HEAD) php artisan --version\ndocker image inspect ticketfactory-api:$(git rev-parse --short HEAD)";
   if (day === 4) return "ssh ec2-user@<ec2-public-ip>\nsudo dnf update -y\nsudo dnf install -y docker\nsudo systemctl enable --now docker\ndocker compose version\ndocker compose up -d\ndocker compose ps\ncurl -I http://<ec2-public-ip>/health";
   if (day === 5) return "aws rds describe-db-instances\naws s3 ls\naws elasticache describe-cache-clusters\nredis-cli -h <redis-endpoint> ping";
+  if (associateLabSpecs[day]) return associateLabSpecs[day].command;
   if (titleEn.includes("ECR")) return "aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com";
   if (titleEn.includes("ECS")) return "aws ecs update-service --cluster ticketfactory --service web --force-new-deployment";
   if (titleEn.includes("CloudWatch")) return "aws logs tail /ecs/ticketfactory-web --follow";
@@ -158,6 +801,7 @@ const pitfallForDay = (day: number) => {
   if (day === 3) return "Production image 不是 dev container；不要依賴 bind mount、latest tag、dev dependency 或 container local storage。";
   if (day === 4) return "EC2 first deploy 不是最終架構；重點是先建立可理解的 server/firewall/runtime/rollback 路徑，Security Group 不可為了方便全開。";
   if (day === 5) return "抽離 stateful service 時不要只改 endpoint；要同時處理 security boundary、backup/restore、migration rollback 與檔案權限。";
+  if (associateLabSpecs[day]) return associateLabSpecs[day].pitfall;
   if (day <= 5) return "Deployment-first 不代表亂上線；每一天都要留下可以 rollback 與驗收的文件。";
   if (day <= 15) return "進階階段最常失敗在 boundary 沒切清楚：web、worker、scheduler、database、storage 要分開驗證。";
   return "深入階段不要只追服務可用，要能解釋安全、成本、可靠性、擴展與事件處理。";
@@ -603,6 +1247,19 @@ const deploymentMentorScripts: Record<number, MentorScript> = {
 
 const buildMentorScript = (day: number, title: string, titleEn: string, summary: string, phase: Phase): MentorScript => {
   if (deploymentMentorScripts[day]) return deploymentMentorScripts[day];
+  if (associateLabSpecs[day]) {
+    const spec = associateLabSpecs[day];
+    return {
+      scenario: spec.scenario,
+      whyItMatters: spec.whyItMatters,
+      todayGoal: spec.todayGoal,
+      previousContext: spec.previousContext,
+      nextContext: spec.nextContext,
+      guidedSteps: buildAssociateGuidedSteps(spec),
+      quickQuestions: spec.quickQuestions,
+      deliverables: spec.deliverables
+    };
+  }
 
   const stageIntro = day <= 5
     ? "我們還在部署落地階段，重點是把本機 Docker Compose 專案變成可以被驗證、交付、rollback 的部署 artifact。"
@@ -754,9 +1411,29 @@ const deploymentAcceptanceByDay: Record<number, string[]> = {
   ]
 };
 
+const examMappingForDay = (day: number, phase: Phase, titleEn: string) => {
+  if (associateLabSpecs[day]) return associateLabSpecs[day].examMapping;
+  if (day <= 5) {
+    return [
+      "Cloud Practitioner / Foundational: understand shared responsibility, deployment basics, and core AWS service categories.",
+      "Associate prep bridge: convert Docker Compose inventory into evidence used later for SAA/DVA/CloudOps labs."
+    ];
+  }
+  if (phase === "Deep Dive") {
+    return [
+      `Professional prep: ${titleEn} strengthens architecture tradeoff explanation, operational risk review, and defense readiness.`,
+      "Senior full-stack deployment portfolio: connect AWS service choices to reliability, security, cost, and maintainability."
+    ];
+  }
+  return [
+    "Associate prep: map this lab to at least one AWS exam domain and one production artifact."
+  ];
+};
+
 const buildLesson = (day: number, topic: string[]) => {
   const [title, titleEn, summary] = topic;
   const phase = phaseForDay(day);
+  const associateSpec = associateLabSpecs[day];
   const mentorScript = buildMentorScript(day, title, titleEn, summary, phase);
   return {
     day,
@@ -773,7 +1450,7 @@ const buildLesson = (day: number, topic: string[]) => {
         : "完成一份 deep-dive review artifact，能向工程主管說明設計取捨與風險。",
     command: commandForDay(day, titleEn),
     pitfall: pitfallForDay(day),
-    documentSpec: deploymentDocumentSpecByDay[day] ?? [
+    documentSpec: associateSpec?.documentSpec ?? deploymentDocumentSpecByDay[day] ?? [
       `Learning note: ${titleEn} 的中文/English 概念、適用情境、與 TicketFactory 對應檔案。`,
       "Architecture spec: 畫出 before/after flow，標記 stateless service、stateful service、network boundary。",
       "Runbook: 寫出 setup、deploy、verify、rollback 四段指令，不留口頭步驟。",
@@ -785,14 +1462,14 @@ const buildLesson = (day: number, topic: string[]) => {
       "Scenario UI: 使用者輸入自己的 project stack 後，應能看到本日對應的 AWS service mapping。",
       "Progress UI: 完成本日 checkpoint 後，tenant-scoped progress 更新。"
     ],
-    steps: deploymentStepsByDay[day] ?? [
+    steps: associateSpec?.steps ?? deploymentStepsByDay[day] ?? [
       "Read: 先閱讀本日概念，確認你知道這個 AWS/Docker 元件解決什麼問題。",
       "Inspect: 對照 TicketFactory 的 docker-compose、Dockerfile、env、Nginx 或 Laravel config。",
       "Implement: 依照本日 lab 產出設定、指令或架構文件。",
       "Verify: 用 command、browser、logs 或 screenshot 驗證，不用感覺宣告完成。",
       "Record: 把結果寫進 deployment report，包含問題、修復與下一步。"
     ],
-    acceptance: deploymentAcceptanceByDay[day] ?? [
+    acceptance: associateSpec?.acceptance ?? deploymentAcceptanceByDay[day] ?? [
       "至少 20 分鐘以上可操作內容，不只閱讀文字。",
       "有一份可保存的文件或規格輸出。",
       "有一個明確 command 或 UI 操作可以驗證。",
@@ -801,6 +1478,7 @@ const buildLesson = (day: number, topic: string[]) => {
     ],
     expectedOutcome: `${phase} 階段 Day ${day} 完成後，學員會得到一份 ${titleEn} artifact，並能把它放進最終 AWS deployment portfolio。`,
     sourceNotes: sourceNotesForDay(day, titleEn),
+    examMapping: examMappingForDay(day, phase, titleEn),
     mentorScript
   } satisfies Lesson;
 };
