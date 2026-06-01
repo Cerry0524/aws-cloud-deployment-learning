@@ -1042,7 +1042,7 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
 @media (max-width: 900px) {
   :root {
-    --mobile-shell-top: 176px;
+    --mobile-shell-top: 104px;
     --mobile-bottom-safe: 20px;
   }
 
@@ -1059,8 +1059,11 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
     max-height: none;
     overflow: hidden;
     overscroll-behavior: auto;
-    padding: 10px 12px 9px;
-    gap: 10px;
+    padding: 8px 10px 7px;
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 7px 8px;
+    align-items: center;
     border-right: 0;
     border-bottom: 1px solid rgba(169, 187, 209, 0.65);
     background: rgba(255, 255, 255, 0.96);
@@ -1069,14 +1072,19 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   }
 
   .brand {
-    min-height: 40px;
-    justify-content: flex-start;
+    min-height: 36px;
+    gap: 0;
+    justify-content: center;
   }
 
   .brand-mark {
     width: 36px;
     height: 36px;
     border-radius: 10px;
+  }
+
+  .brand > div:not(.brand-mark) {
+    display: none;
   }
 
   .brand strong {
@@ -1089,16 +1097,17 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
   .mobile-shell-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+    gap: 6px;
+    min-width: 0;
   }
 
   .mobile-tenant-select,
   .mobile-account-chip {
     min-width: 0;
-    min-height: 42px;
+    min-height: 36px;
     border: 1px solid #dce8f5;
-    border-radius: 12px;
+    border-radius: 10px;
     background: #fff;
     box-shadow: 0 6px 16px rgba(38, 72, 122, 0.045);
   }
@@ -1106,38 +1115,39 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   .mobile-tenant-select {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 8px;
+    gap: 6px;
     align-items: center;
-    padding: 6px 8px 6px 10px;
+    padding: 4px 6px 4px 8px;
   }
 
   .mobile-tenant-select span {
     color: #06765f;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 900;
     white-space: nowrap;
   }
 
   .mobile-tenant-select select {
-    min-height: 30px;
-    padding: 5px 28px 5px 8px;
+    min-height: 28px;
+    padding: 4px 24px 4px 6px;
     border: 0;
     color: #172033;
+    font-size: 12px;
     font-weight: 800;
     background: transparent;
   }
 
   .mobile-account-chip {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 38px;
-    gap: 8px;
+    grid-template-columns: 28px minmax(0, 1fr) 30px;
+    gap: 5px;
     align-items: center;
-    padding: 5px;
+    padding: 4px;
   }
 
   .mobile-avatar {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     display: grid;
     place-items: center;
     border-radius: 10px;
@@ -1151,14 +1161,14 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
     min-width: 0;
     overflow: hidden;
     color: #172033;
-    font-size: 13px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .mobile-account-chip button {
-    width: 34px;
-    height: 32px;
+    width: 30px;
+    height: 28px;
     border: 1px solid #9af0dc;
     border-radius: 10px;
     display: grid;
@@ -1173,11 +1183,12 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   }
 
   .app-nav {
+    grid-column: 1 / -1;
     display: flex;
-    gap: 8px;
+    gap: 7px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 2px 2px 5px;
+    padding: 1px 1px 4px;
     margin: 0 -2px;
     scroll-snap-type: x proximity;
     scrollbar-width: none;
@@ -1194,8 +1205,8 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   .app-nav button {
     flex: 0 0 auto;
     min-width: max-content;
-    min-height: 46px;
-    padding: 9px 12px;
+    min-height: 38px;
+    padding: 7px 11px;
     border-radius: 999px;
     border-color: #dce8f5;
     background: #fff;
@@ -1230,18 +1241,11 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
   }
 
   .main {
-    padding: 12px 12px calc(28px + env(safe-area-inset-bottom));
+    padding: 10px 10px calc(26px + env(safe-area-inset-bottom));
   }
 
   .topbar {
-    position: static;
-    top: auto;
-    display: grid;
-    gap: 12px;
-    align-items: start;
-    padding: 13px;
-    margin-bottom: 12px;
-    border-radius: 10px;
+    display: none;
   }
 
   .topbar h1,
@@ -1467,7 +1471,7 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
 @media (max-width: 640px) {
   :root {
-    --mobile-shell-top: 174px;
+    --mobile-shell-top: 104px;
   }
 
   .main {
@@ -1652,11 +1656,19 @@ td small { display: block; color: #7b8495; margin-top: 3px; }
 
 @media (max-width: 380px) {
   :root {
-    --mobile-shell-top: 218px;
+    --mobile-shell-top: 104px;
   }
 
-  .mobile-shell-actions {
-    grid-template-columns: 1fr;
+  .mobile-account-chip {
+    grid-template-columns: 28px 30px;
+  }
+
+  .mobile-account-chip strong {
+    display: none;
+  }
+
+  .mobile-tenant-select span {
+    display: none;
   }
 
   .metrics {
