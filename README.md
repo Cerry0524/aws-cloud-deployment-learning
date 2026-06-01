@@ -30,6 +30,21 @@ http://localhost:4321
 
 ## Docker Compose
 
+Recommended compatible flow for this machine:
+
+```bash
+docker build -t aws-docker-compose-learning-platform:local .
+docker-compose up
+```
+
+If your Docker Compose build integration is available:
+
+```bash
+docker-compose up --build
+```
+
+If your Docker installation supports the Compose plugin, this also works:
+
 ```bash
 docker compose up --build
 ```
@@ -57,4 +72,3 @@ password: password123
 ```bash
 npm run build
 ```
-

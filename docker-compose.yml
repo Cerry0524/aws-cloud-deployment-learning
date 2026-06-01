@@ -1,5 +1,6 @@
 services:
   learning-platform:
+    image: aws-docker-compose-learning-platform:local
     build:
       context: .
     ports:

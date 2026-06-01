@@ -74,6 +74,7 @@ pre { white-space: pre-wrap; background: #172033; color: #e8fff5; padding: 16px;
 .checkline svg { color: #07835f; }
 .check-option, .option { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #dfe6ef; border-radius: 8px; margin-bottom: 10px; }
 select, input { width: 100%; padding: 12px; border: 1px solid #dfe6ef; border-radius: 8px; background: #fff; color: #172033; }
+input[type="radio"], input[type="checkbox"] { width: auto; padding: 0; flex: 0 0 auto; }
 .recommendation { margin-top: 16px; background: #edf8f3; border-color: #bce8d5; color: #075d43; }
 .row-button { width: 100%; border: 1px solid #dfe6ef; background: #fff; border-radius: 8px; padding: 14px; text-align: left; display: flex; gap: 10px; align-items: center; margin-bottom: 10px; cursor: pointer; }
 .row-button.selected, .active-option { border-color: #07835f; background: #edf8f3; }
