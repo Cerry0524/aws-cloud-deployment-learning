@@ -2227,54 +2227,551 @@ export const allLessons: Lesson[] = [
   ...deepDiveTopics.map((topic, index) => buildLesson(index + 16, topic))
 ];
 
-export const quizQuestions = [
-  {
-    id: "q1",
-    prompt: "在 production 中，Laravel 上傳檔案最不應該只放在哪裡？",
-    promptEn: "Where should Laravel uploads not live as the only copy in production?",
-    options: ["Container local filesystem", "S3", "EFS", "Private object storage"],
-    answer: "Container local filesystem",
-    explanation: "Container is disposable. 容器可被重建，重要檔案應放在 S3/EFS 等持久層。"
-  },
-  {
-    id: "q2",
-    prompt: "ECS Fargate 部署 Laravel Queue Worker 時，最適合的做法是？",
-    promptEn: "What is the best ECS pattern for Laravel Queue Worker?",
-    options: ["Run it inside the same web request", "Create a separate ECS Service", "Use browser cron", "Store jobs in Git"],
-    answer: "Create a separate ECS Service",
-    explanation: "Queue Worker should scale and restart independently. Worker 應與 web API 分開管理。"
-  },
-  {
-    id: "q3",
-    prompt: "RDS production database 的 Security Group 應該允許誰連線？",
-    promptEn: "Who should be allowed to connect to production RDS?",
-    options: ["0.0.0.0/0", "Only ECS task security group", "Every office IP forever", "Any GitHub Actions runner"],
-    answer: "Only ECS task security group",
-    explanation: "Use least privilege. Database should stay private and accept traffic only from known app sources."
-  }
+export type StageKey = "deployment" | "advanced" | "deep-dive";
+export type SkillArea = "Docker" | "ECS" | "Networking" | "Data" | "CI/CD" | "Observability" | "Security" | "Cost/DR";
+
+export type QuizQuestion = {
+  id: string;
+  day?: number;
+  stageKey?: StageKey;
+  skillArea: SkillArea;
+  prompt: string;
+  promptEn?: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+  examMapping?: string[];
+  remediationLessonDays?: number[];
+};
+
+export type InteractiveScenario = {
+  title: string;
+  stageKey: StageKey;
+  relatedDays: number[];
+  skillArea: SkillArea;
+  symptom: string;
+  evidence: string;
+  choices: string[];
+  correctDiagnosis: string;
+  fix: string;
+  prevention: string;
+  examMapping: string[];
+};
+
+const stageKeyForDay = (day: number): StageKey => {
+  if (day <= 5) return "deployment";
+  if (day <= 15) return "advanced";
+  return "deep-dive";
+};
+
+const skillAreaForDay = (day: number): SkillArea => {
+  if (day <= 3) return "Docker";
+  if ([4, 8, 10, 14, 22].includes(day)) return "ECS";
+  if ([6, 9, 20].includes(day)) return "Networking";
+  if ([5, 18, 19, 21, 27].includes(day)) return "Data";
+  if ([7, 13, 25, 26, 29, 30].includes(day)) return "CI/CD";
+  if ([15, 28].includes(day)) return "Observability";
+  if ([11, 16, 17].includes(day)) return "Security";
+  return "Cost/DR";
+};
+
+const stageExamMapping: Record<StageKey, string[]> = {
+  deployment: ["Cloud Practitioner bridge", "Docker production readiness", "EC2 first deploy"],
+  advanced: ["SAA-C03", "DVA-C02", "CloudOps Engineer Associate (SOA-C03)"],
+  "deep-dive": ["AWS Well-Architected", "DevOps Pro prep", "SA Pro prep"]
+};
+
+const dailyQuizQuestions: QuizQuestion[] = allLessons.flatMap((lesson) => {
+  const stageKey = stageKeyForDay(lesson.day);
+  const skillArea = skillAreaForDay(lesson.day);
+  const firstCommand = lesson.command.split("\n")[0];
+  const primaryDeliverable = lesson.mentorScript.deliverables[0] ?? `${lesson.titleEn} artifact`;
+  const primarySpec = lesson.documentSpec[0] ?? "本日規格文件";
+  const remediation = [lesson.day];
+
+  return [
+    {
+      id: `day-${lesson.day}-artifact`,
+      day: lesson.day,
+      stageKey,
+      skillArea,
+      prompt: `Day ${lesson.day} 的情境中，最能證明你不是只看完文字的交付物是什麼？`,
+      promptEn: `Which artifact best proves Day ${lesson.day} is practiced, not only read?`,
+      options: [primaryDeliverable, "只記住 AWS service 名稱", "直接跳到下一天", "把所有 port 都開成 public"],
+      answer: primaryDeliverable,
+      explanation: `本日應留下 ${primaryDeliverable}。這份 artifact 會銜接後續 lesson 與 final deployment portfolio。`,
+      examMapping: lesson.examMapping,
+      remediationLessonDays: remediation
+    },
+    {
+      id: `day-${lesson.day}-evidence`,
+      day: lesson.day,
+      stageKey,
+      skillArea,
+      prompt: `你在 Day ${lesson.day} 遇到「${lesson.pitfall}」這類問題時，第一步最應該做什麼？`,
+      promptEn: "What should you do first when this pitfall appears?",
+      options: [`先用本日驗證指令收集 evidence：${firstCommand}`, "先把 AWS 服務全部換掉", "先關閉 health check", "先把 Security Group 全開"],
+      answer: `先用本日驗證指令收集 evidence：${firstCommand}`,
+      explanation: "部署訓練的重點是用 command、logs、diagram 或 checklist 取得證據，不用猜測宣告完成。",
+      examMapping: lesson.examMapping,
+      remediationLessonDays: remediation
+    },
+    {
+      id: `day-${lesson.day}-remediation`,
+      day: lesson.day,
+      stageKey,
+      skillArea,
+      prompt: `如果 Day ${lesson.day} 的驗收沒有通過，最合理的 remediation path 是？`,
+      promptEn: "What is the best remediation path if this day's acceptance criteria fail?",
+      options: [`回到 Day ${lesson.day} 補齊：${primarySpec}`, "只重新整理瀏覽器", "把錯誤截圖藏起來", "略過 artifact 等最後一天再補"],
+      answer: `回到 Day ${lesson.day} 補齊：${primarySpec}`,
+      explanation: `錯題要回到對應 lesson 補 artifact、驗證與 troubleshooting note。Day ${lesson.day} 的核心規格是：${primarySpec}`,
+      examMapping: lesson.examMapping,
+      remediationLessonDays: remediation
+    }
+  ];
+});
+
+const makeStageQuestion = (
+  id: string,
+  stageKey: StageKey,
+  skillArea: SkillArea,
+  prompt: string,
+  answer: string,
+  options: string[],
+  explanation: string,
+  remediationLessonDays: number[]
+): QuizQuestion => ({
+  id: `stage-${stageKey}-${id}`,
+  stageKey,
+  skillArea,
+  prompt,
+  promptEn: `Stage exam question for ${stageKey}`,
+  options,
+  answer,
+  explanation,
+  examMapping: stageExamMapping[stageKey],
+  remediationLessonDays
+});
+
+const stageExamQuestions: QuizQuestion[] = [
+  makeStageQuestion("deploy-1", "deployment", "Docker", "本機 Docker Compose 可跑，但 Day 2 production-like run 失敗，最常見原因是？", "container 內仍用 localhost 連 DB/Redis", ["container 內仍用 localhost 連 DB/Redis", "ECS desired count 太低", "CloudFront cache 太久", "RDS snapshot 太舊"], "container 內的 localhost 指向自己，不是你的 host，也不是另一個 service。", [2]),
+  makeStageQuestion("deploy-2", "deployment", "Docker", "Production image build 成功但雲端跑起來沒有 Laravel app source，該回哪個概念？", "dev bind mount 沒有被 production image packaging 取代", ["dev bind mount 沒有被 production image packaging 取代", "ALB matcher 太嚴格", "RDS public access 關閉", "CloudWatch dashboard 不存在"], "Day 3 要移除 dev-only bind mount 依賴，把 source/dependency 打進 image。", [3]),
+  makeStageQuestion("deploy-3", "deployment", "Networking", "EC2 first deploy public health 失敗，最合理的診斷順序是？", "Security Group、host port、container port、app logs 逐層查", ["Security Group、host port、container port、app logs 逐層查", "先改成 public RDS", "先刪掉 Dockerfile", "先開 CloudFront invalidation"], "Day 4 的外部流量會經過多層邊界，要逐層收證據。", [4]),
+  makeStageQuestion("deploy-4", "deployment", "Data", "EC2 可以跑，但 uploads 和 database 都在同一台主機。正式化下一步是？", "設計 RDS/S3/ElastiCache stateful extraction plan", ["設計 RDS/S3/ElastiCache stateful extraction plan", "把 EC2 volume 當永久備份", "把 bucket 設 public", "只加大 EC2 instance"], "Day 5 要把資料責任抽離到 managed services，並補 backup/rollback。", [5]),
+  makeStageQuestion("deploy-5", "deployment", "Security", "為了快速測試，把 DB port 對 0.0.0.0/0 開放會違反什麼？", "least privilege network boundary", ["least privilege network boundary", "React build hash", "queue idempotency", "CloudFront invalidation"], "資料層通常只接受 app security group，不直接公開。", [4, 5]),
+  makeStageQuestion("deploy-6", "deployment", "Docker", "Day 1 inventory 最重要的用途是？", "讓後續 EC2/ECS/RDS/S3 mapping 有依據", ["讓後續 EC2/ECS/RDS/S3 mapping 有依據", "取代所有測試", "避免寫 runbook", "讓 production 可以不用 rollback"], "沒有 inventory，後續 service boundary 和資料責任會變成猜測。", [1]),
+  makeStageQuestion("deploy-7", "deployment", "Observability", "container 顯示 Up 是否等於 service ready？", "不是，還要驗證 health endpoint 和 dependencies", ["不是，還要驗證 health endpoint 和 dependencies", "是，Up 就代表 production ready", "只要 image 有 latest tag 就 ready", "只要 EC2 能 SSH 就 ready"], "running process 不等於 HTTP/DB/Redis 都 ready。", [2]),
+  makeStageQuestion("deploy-8", "deployment", "CI/CD", "image 只用 latest tag 最大風險是？", "rollback 時不知道上一版是哪個 artifact", ["rollback 時不知道上一版是哪個 artifact", "ALB 不能支援 HTTPS", "S3 不能存檔", "VPC 不能建 private subnet"], "commit SHA/release tag 才能讓部署可追蹤。", [3, 7]),
+  makeStageQuestion("deploy-9", "deployment", "Data", "抽離 RDS/S3/Redis 時，只改 endpoint 為什麼不夠？", "還要處理 security boundary、backup、migration、rollback", ["還要處理 security boundary、backup、migration、rollback", "還要把 bucket public", "還要刪除 health check", "還要把 worker 放進 web process"], "Managed service extraction 是資料責任與網路邊界的改造。", [5]),
+  makeStageQuestion("deploy-10", "deployment", "Docker", "部署文件最少應包含哪四段？", "setup、deploy、verify、rollback", ["setup、deploy、verify、rollback", "logo、顏色、字型、動畫", "signup、login、logout、profile", "cache、cookie、session、browser"], "Runbook 要能讓另一位工程師接手操作和復原。", [1, 4]),
+
+  makeStageQuestion("adv-1", "advanced", "Networking", "ALB 放 public subnet、ECS/RDS 放 private subnet的主因是？", "外部只進 ALB，app/data 留在私有邊界", ["外部只進 ALB，app/data 留在私有邊界", "讓 RDS 更容易被任何人連線", "讓 task 不需要 Security Group", "讓 CloudWatch 不能收 logs"], "Day 6 的 network boundary 是 Advanced 階段基礎。", [6]),
+  makeStageQuestion("adv-2", "advanced", "CI/CD", "ECR image tag policy 最不該只依賴什麼？", "latest", ["latest", "commit SHA", "image digest", "release note"], "latest 會移動，難以審查與 rollback。", [7]),
+  makeStageQuestion("adv-3", "advanced", "ECS", "ECS task definition 和 service 差異是？", "task definition 是規格，service 維持 desired count 和 rollout", ["task definition 是規格，service 維持 desired count 和 rollout", "service 是 Dockerfile", "task definition 是 S3 bucket", "service 只負責 billing"], "Day 8 必須分清規格、task、service、cluster。", [8]),
+  makeStageQuestion("adv-4", "advanced", "Networking", "ECS task running 但 ALB target unhealthy，代表什麼？", "process 活著，但 ALB health path/port/SG/readiness 未通過", ["process 活著，但 ALB health path/port/SG/readiness 未通過", "CloudFront 一定壞了", "RDS 一定 public", "CI 一定沒有 OIDC"], "Day 9 的真相入口是 target health，不只是 runningCount。", [9]),
+  makeStageQuestion("adv-5", "advanced", "ECS", "Laravel worker 和 scheduler 為什麼不該塞在 web service？", "擴展、restart、health、部署節奏不同", ["擴展、restart、health、部署節奏不同", "因為 worker 只能跑在 browser", "因為 scheduler 不能寫 logs", "因為 ALB 不能連 ECS"], "Day 10 需要 web/worker/scheduler runtime split。", [10]),
+  makeStageQuestion("adv-6", "advanced", "Security", "React build env 可以放 DB password 嗎？", "不可以，前端 bundle 會被使用者下載", ["不可以，前端 bundle 會被使用者下載", "可以，只要變數名很長", "可以，CloudFront 會加密 JS", "可以，因為 React 在 AWS 上"], "Day 12/11 要分 public config 和 secret。", [11, 12]),
+  makeStageQuestion("adv-7", "advanced", "Security", "ECS secret 最合理的做法是？", "task definition 使用 Secrets Manager/SSM reference", ["task definition 使用 Secrets Manager/SSM reference", "寫進 Dockerfile ENV", "寫進 GitHub README", "放進 React build"], "Secret 不應 bake into image 或 repo。", [11]),
+  makeStageQuestion("adv-8", "advanced", "CI/CD", "GitHub Actions deploy ECS 時，哪個 artifact 應被 render 進 task definition？", "commit SHA image URI", ["commit SHA image URI", "瀏覽器 history", "S3 bucket public flag", "RDS master password"], "Day 13 要讓 pipeline 可追蹤、可 rollback。", [13]),
+  makeStageQuestion("adv-9", "advanced", "ECS", "Zero downtime deployment 不能只靠 rolling update，還要搭配什麼？", "health gate、capacity、migration compatibility、rollback", ["health gate、capacity、migration compatibility、rollback", "只把 desired count 設 0", "只清空 CloudFront cache", "只改 README"], "Day 14 的重點是部署順序和驗證門檻。", [14]),
+  makeStageQuestion("adv-10", "advanced", "Observability", "CloudWatch alarm 應該服務哪個目的？", "在使用者大量回報前偵測錯誤或容量風險", ["在使用者大量回報前偵測錯誤或容量風險", "取代所有 logs", "讓部署不用 rollback", "讓 RDS 可以 public"], "Day 15 讓 deployment acceptance 有指標。", [15]),
+  makeStageQuestion("adv-11", "advanced", "Data", "S3 + CloudFront 發布 React 時，index.html 快取最常造成什麼？", "使用者拿到舊 bundle reference", ["使用者拿到舊 bundle reference", "RDS 無法連線", "worker job 重複", "APP_KEY 消失"], "Day 12 要處理 asset hash、cache policy、invalidation。", [12]),
+  makeStageQuestion("adv-12", "advanced", "Networking", "ALB 502 的常見診斷點不包含哪個？", "把所有 AWS service 改名", ["把所有 AWS service 改名", "container port", "health path", "security group"], "502 要回到 traffic path 與 target health 診斷。", [9]),
+  makeStageQuestion("adv-13", "advanced", "CI/CD", "migration gate 要防止什麼？", "不可逆 schema change 未審查就進 production", ["不可逆 schema change 未審查就進 production", "React 使用 TypeScript", "ECR image 有 digest", "CloudWatch 有 dashboard"], "CI/CD 不能盲目自動化破壞性 migration。", [13, 14]),
+  makeStageQuestion("adv-14", "advanced", "ECS", "scheduler 多副本最可能造成什麼？", "重複執行排程任務", ["重複執行排程任務", "ALB DNS 消失", "S3 無法 presign", "RDS snapshot 自動刪除"], "Scheduler 需要 single runner 或 distributed lock。", [10]),
+  makeStageQuestion("adv-15", "advanced", "Observability", "部署後驗收不該只看什麼？", "工程師覺得網頁打得開", ["工程師覺得網頁打得開", "ALB 5xx", "target health", "ECS logs"], "Production readiness 要用 logs/metrics/alarms/dashboard 驗證。", [15]),
+
+  makeStageQuestion("deep-1", "deep-dive", "Security", "Security hardening review 看到 APP_DEBUG=true，正確判斷是？", "production blocker，可能暴露 stack/env/secret 線索", ["production blocker，可能暴露 stack/env/secret 線索", "可以接受，只要 ALB 有 HTTPS", "只影響 UI 顏色", "只需要清 CloudFront cache"], "Day 16 必須關閉 debug 並檢查 headers/CORS/IAM。", [16]),
+  makeStageQuestion("deep-2", "deep-dive", "Security", "多租戶資料隔離最不能只靠哪一層？", "前端 tenant selector", ["前端 tenant selector", "後端 policy", "DB tenant-aware query", "cross-tenant tests"], "Day 17 要讓 API/query/policy/DB 都遵守 tenant boundary。", [17]),
+  makeStageQuestion("deep-3", "deep-dive", "Data", "destructive migration 最安全的策略通常是？", "expand-contract 或 forward-fix plan", ["expand-contract 或 forward-fix plan", "直接 drop column 並祈禱", "只清 browser cache", "只重啟 ALB"], "Day 18 要先相容、驗證、再收斂。", [18]),
+  makeStageQuestion("deep-4", "deep-dive", "Data", "signed URL 最大原則是？", "bucket 保持 private，URL 短效且綁定授權操作", ["bucket 保持 private，URL 短效且綁定授權操作", "bucket 設 public 方便下載", "URL 永久有效", "把 DB password 放 query string"], "Day 19 要避免 public bucket 和過長 TTL。", [19]),
+  makeStageQuestion("deep-5", "deep-dive", "Networking", "WebSocket 通知能不能作為交易成功依據？", "不能，交易一致性仍靠 DB transaction/lock/queue", ["不能，交易一致性仍靠 DB transaction/lock/queue", "可以，只要前端收到 event", "可以，只要 ALB 支援 HTTPS", "可以，只要 Redis public"], "Day 20/21 分開通知和交易一致性。", [20, 21]),
+  makeStageQuestion("deep-6", "deep-dive", "Data", "高併發搶票 scale out 前一定要先確保什麼？", "lock/transaction/idempotency/constraint 保護 invariants", ["lock/transaction/idempotency/constraint 保護 invariants", "CloudFront invalidation", "GitHub Pages deploy", "README 完整"], "Day 21 的一致性比單純加 worker 更重要。", [21]),
+  makeStageQuestion("deep-7", "deep-dive", "ECS", "worker scaling 只看 CPU 可能漏掉什麼？", "queue backlog 和 worker latency", ["queue backlog 和 worker latency", "S3 object key", "tenant selector 顏色", "Git log"], "Day 22 要用 queue depth 與 workload-specific metrics。", [22]),
+  makeStageQuestion("deep-8", "deep-dive", "Cost/DR", "最危險的成本優化是？", "把 private data resource 改 public 省 NAT/網路成本", ["把 private data resource 改 public 省 NAT/網路成本", "調整 log retention", "rightsizing RDS", "加 budget alarm"], "Day 23 要保留安全/可靠性底線。", [23]),
+  makeStageQuestion("deep-9", "deep-dive", "Cost/DR", "有 RDS snapshot 是否等於 DR 完成？", "不是，還要 restore、驗證、切換、溝通演練", ["不是，還要 restore、驗證、切換、溝通演練", "是，有 snapshot 就能保證 RTO", "是，CloudFront 會自動還原 DB", "是，ECS desired count 會復原資料"], "Day 24 要用 RPO/RTO 和 restore drill 證明。", [24]),
+  makeStageQuestion("deep-10", "deep-dive", "CI/CD", "IaC module boundary 應依什麼切？", "生命週期與責任，例如 network/data/app/ops/security", ["生命週期與責任，例如 network/data/app/ops/security", "字母順序", "檔案大小", "誰先建立"], "Day 25 要避免所有資源塞進單一 module。", [25]),
+  makeStageQuestion("deep-11", "deep-dive", "CI/CD", "Release governance 除了 CI 綠燈，還需要什麼？", "approval、change log、rollback owner、post-deploy evidence", ["approval、change log、rollback owner、post-deploy evidence", "只需要更多顏色", "只需要 localStorage", "只需要關閉 alarms"], "Day 26 讓 production change 可審計。", [26]),
+  makeStageQuestion("deep-12", "deep-dive", "Data", "API 慢時不該第一時間假設什麼？", "只要加 ECS task 就會解決", ["只要加 ECS task 就會解決", "可能是 N+1", "可能缺 index", "可能 queue latency"], "Day 27 要先看 p95、SQL、cache、queue。", [27]),
+  makeStageQuestion("deep-13", "deep-dive", "Observability", "Final Architecture Review 最重要的不是服務清單，而是？", "evidence、risk owner、severity、remediation priority", ["evidence、risk owner、severity、remediation priority", "logo", "hero 文案", "只列 AWS 名稱"], "Day 28 要用 Well-Architected 方式審查。", [28]),
+  makeStageQuestion("deep-14", "deep-dive", "CI/CD", "Portfolio report 最能展現工程判斷的格式是？", "problem -> decision -> evidence -> tradeoff", ["problem -> decision -> evidence -> tradeoff", "只貼截圖", "只列服務價格", "只放登入帳密"], "Day 29 是把 artifact 轉成可展示敘事。", [29]),
+  makeStageQuestion("deep-15", "deep-dive", "CI/CD", "Capstone Defense 回答『能上 production 嗎』最好的方式是？", "有條件回答已滿足、blocker、accepted risks、monitoring、rollback", ["有條件回答已滿足、blocker、accepted risks、monitoring、rollback", "直接說可以，不需證據", "直接說不可以，不需分析", "只回答用了 ECS"], "Day 30 要能 defend 取捨和剩餘風險。", [30]),
+  makeStageQuestion("deep-16", "deep-dive", "Security", "tenant context 缺失時，安全設計應偏向？", "fail closed", ["fail closed", "fail open", "自動切到第一個 tenant", "顯示所有資料方便 debug"], "Day 17 的 tenant isolation 應避免跨租戶洩漏。", [17]),
+  makeStageQuestion("deep-17", "deep-dive", "Observability", "Well-Architected review claim 應該連到什麼？", "diagram、runbook、command output、dashboard 或 test", ["diagram、runbook、command output、dashboard 或 test", "口頭印象", "只連到首頁", "只連到色票"], "Day 28/30 的答辯要 evidence-backed。", [28, 30]),
+  makeStageQuestion("deep-18", "deep-dive", "Cost/DR", "RPO 問的是什麼？", "可接受遺失多久資料", ["可接受遺失多久資料", "可接受多快登入", "可接受多少 CSS", "可接受多少 tenant"], "Day 24 要明確 RPO/RTO。", [24]),
+  makeStageQuestion("deep-19", "deep-dive", "ECS", "Autoscaling 的 max capacity guardrail 是為了？", "避免擴展打爆 DB 或造成成本失控", ["避免擴展打爆 DB 或造成成本失控", "讓所有 task 永遠為 0", "讓 Redis public", "讓 CloudFront 停止 cache"], "Day 22 需要 capacity 與成本/DB guardrail。", [22, 23]),
+  makeStageQuestion("deep-20", "deep-dive", "Security", "Audit trail 最少要能回答什麼？", "誰改、改什麼、何時改、誰批准、結果與 rollback", ["誰改、改什麼、何時改、誰批准、結果與 rollback", "按鈕顏色", "瀏覽器尺寸", "localStorage key 名稱"], "Day 26 的治理讓 production change 可追溯。", [26])
 ];
 
-export const labs = [
+export const quizQuestions: QuizQuestion[] = [...dailyQuizQuestions, ...stageExamQuestions];
+
+const diagnose = (correct: string, choices: string[] = []) => [correct, ...choices.filter((choice) => choice !== correct)].slice(0, 4);
+
+export const labs: InteractiveScenario[] = [
   {
-    title: "Port Conflict Debugging",
-    description: "TicketFactory uses 8080/8443/5432/6379. 你需要為教學網站避開這些 ports。",
-    hint: "先用 lsof 檢查目前 listening ports。",
-    diagnosis: "Docker Desktop already owns 80/443, and TicketFactory compose uses 8080/8443.",
-    solution: "Use 4321 for this learning platform, and 18080/18443 override for TicketFactory labs."
+    title: "Local Compose: port collision",
+    stageKey: "deployment",
+    relatedDays: [1, 2],
+    skillArea: "Docker",
+    symptom: "docker compose up 失敗，Nginx 無法 bind 8080，瀏覽器打 localhost 看到另一個專案。",
+    evidence: "lsof 顯示 8080/8443 已被 TicketFactory 或 Docker Desktop 使用；docker compose ps 顯示 web exited。",
+    correctDiagnosis: "host port collision，compose override 沒有避開既有服務。",
+    choices: diagnose("host port collision，compose override 沒有避開既有服務。", ["RDS public access 被關閉。", "CloudFront cache stale。", "APP_DEBUG=false 導致 port 被佔用。"]),
+    fix: "改用 .env.production.local 或 compose override，把教學/專案 ports 分離，例如 4321、18080、18443。",
+    prevention: "Day 1/2 保存 port map，deploy 前固定跑 lsof 與 docker compose config。",
+    examMapping: ["Docker production readiness", "Cloud Practitioner bridge"]
   },
   {
-    title: "Production Image Packaging",
-    description: "docker-compose.prod.yml 掛 storage volume，但 PHP image 沒有 app source。",
-    hint: "檢查 Dockerfile 是否 COPY backend source。",
-    diagnosis: "Runtime image only installs extensions. Production needs code packaged into image.",
-    solution: "Add multi-stage build: copy backend, composer install --no-dev, run artisan optimize."
+    title: "Local Compose: container uses localhost",
+    stageKey: "deployment",
+    relatedDays: [2],
+    skillArea: "Docker",
+    symptom: "API container 回 500，Laravel log 顯示 SQLSTATE connection refused on 127.0.0.1。",
+    evidence: "DB container healthy，但 API env 的 DB_HOST=localhost；container-to-container DNS 應使用 service name。",
+    correctDiagnosis: "container 內 localhost 指向自己，不是 database service。",
+    choices: diagnose("container 內 localhost 指向自己，不是 database service。", ["ALB target group matcher 設錯。", "S3 signed URL 過期。", "CloudWatch alarm 門檻太低。"]),
+    fix: "將 DB_HOST 改成 compose service name，例如 db 或 postgres，並重新跑 health check。",
+    prevention: "Day 2 checklist 必須檢查 container network env，不只看 browser 可不可以開。",
+    examMapping: ["Docker networking", "DVA-C02 troubleshooting"]
   },
   {
-    title: "ALB Health Check Failed",
-    description: "ECS service 一直重啟，Target Group health check 顯示 unhealthy。",
-    hint: "確認 health check path、container port、security group。",
-    diagnosis: "ALB cannot reach a stable 200 response from the task.",
-    solution: "Create /health endpoint, map target group to correct container port, allow ALB SG to ECS SG."
+    title: "Local Compose: volume permission",
+    stageKey: "deployment",
+    relatedDays: [2, 3],
+    skillArea: "Docker",
+    symptom: "Laravel 上傳或 cache 失敗，log 顯示 storage 或 bootstrap/cache permission denied。",
+    evidence: "container user 無法寫入 bind mount；local owner 和 runtime user 不一致。",
+    correctDiagnosis: "runtime writable directory 權限和 production image user 不一致。",
+    choices: diagnose("runtime writable directory 權限和 production image user 不一致。", ["VPC 沒有 Internet Gateway。", "ECR repository 不存在。", "ALB idle timeout 太短。"]),
+    fix: "在 Dockerfile/entrypoint 設定 storage、bootstrap/cache 權限，避免只靠本機 bind mount。",
+    prevention: "Day 3 image smoke test 加入 writable directory 檢查。",
+    examMapping: ["Docker image packaging", "DVA-C02 deployment troubleshooting"]
+  },
+  {
+    title: "Docker Image: source missing",
+    stageKey: "deployment",
+    relatedDays: [3],
+    skillArea: "Docker",
+    symptom: "image build 成功，但 docker run php artisan 回傳 Could not open input file: artisan。",
+    evidence: "Dockerfile 只安裝 extensions，沒有 COPY Laravel source；dev compose 靠 bind mount 才能跑。",
+    correctDiagnosis: "production image 沒有打包 app source。",
+    choices: diagnose("production image 沒有打包 app source。", ["ALB health check path 太嚴格。", "RDS snapshot restore 太慢。", "CloudFront origin 設錯。"]),
+    fix: "改成 multi-stage production Dockerfile，COPY source、composer install --no-dev、php artisan optimize。",
+    prevention: "Day 3 必須跑 docker run smoke test，不能只看 docker build passed。",
+    examMapping: ["Docker image packaging", "ECS container image readiness"]
+  },
+  {
+    title: "Docker Image: composer dependency missing",
+    stageKey: "deployment",
+    relatedDays: [3],
+    skillArea: "Docker",
+    symptom: "container 啟動後 PHP fatal error，找不到 vendor/autoload.php 或 package class。",
+    evidence: "production build 沒有 composer install，或把 vendor 放在 .dockerignore。",
+    correctDiagnosis: "production image 缺少 runtime dependencies。",
+    choices: diagnose("production image 缺少 runtime dependencies。", ["Security Group 開太小。", "CloudFront invalidation 缺失。", "RDS public access 關閉。"]),
+    fix: "在 build stage 執行 composer install --no-dev --optimize-autoloader，並確認 vendor 進入 runtime image。",
+    prevention: "image inspect 與 smoke test 要檢查 composer dependencies。",
+    examMapping: ["DVA-C02 deployment", "container artifact traceability"]
+  },
+  {
+    title: "Docker Image: APP_KEY missing",
+    stageKey: "advanced",
+    relatedDays: [3, 11, 16],
+    skillArea: "Security",
+    symptom: "Laravel production container 回 500：No application encryption key has been specified。",
+    evidence: "task definition environment 沒有 APP_KEY，或 secret reference ARN 錯誤。",
+    correctDiagnosis: "APP_KEY 沒有透過 Secrets Manager/SSM 注入 runtime。",
+    choices: diagnose("APP_KEY 沒有透過 Secrets Manager/SSM 注入 runtime。", ["ALB listener 沒支援 HTTP/2。", "CloudWatch dashboard 太少圖。", "S3 CORS 太寬。"]),
+    fix: "把 APP_KEY 放 Secrets Manager/SSM，ECS task definition 使用 secrets reference。",
+    prevention: "Day 11 secret/config classification 和 Day 16 secret exposure checklist 要納入 release gate。",
+    examMapping: ["DVA-C02 Security", "Security Specialty intro"]
+  },
+  {
+    title: "EC2: Security Group wrong",
+    stageKey: "deployment",
+    relatedDays: [4, 6],
+    skillArea: "Networking",
+    symptom: "EC2 上 docker compose ps 全部 Up，但外部 curl /health timeout。",
+    evidence: "EC2 Security Group 未開 HTTP/HTTPS，或 app listen port 未映射到 host。",
+    correctDiagnosis: "外部入口的 Security Group/host port/container port 沒有串通。",
+    choices: diagnose("外部入口的 Security Group/host port/container port 沒有串通。", ["composer dependency missing。", "CloudFront cache stale。", "RDS migration rollback 失敗。"]),
+    fix: "只開必要 HTTP/HTTPS 來源，確認 host port 到 container port mapping，SSH 限制可信來源。",
+    prevention: "Day 4 runbook 必須保存 inbound rule checklist。",
+    examMapping: ["SAA-C03 secure architectures", "CloudOps Engineer Associate (SOA-C03)"]
+  },
+  {
+    title: "EC2: SSH key permission",
+    stageKey: "deployment",
+    relatedDays: [4],
+    skillArea: "Security",
+    symptom: "ssh ec2-user@ip 失敗，client 顯示 WARNING: UNPROTECTED PRIVATE KEY FILE。",
+    evidence: "pem 權限太寬；或 Security Group 沒允許你的來源 IP 到 port 22。",
+    correctDiagnosis: "SSH key file permission 或 SSH inbound source 不符合安全要求。",
+    choices: diagnose("SSH key file permission 或 SSH inbound source 不符合安全要求。", ["ALB target unhealthy。", "S3 object key 沒 tenant scope。", "GitHub Actions OIDC 缺失。"]),
+    fix: "chmod 400 key.pem，並限制 SSH inbound 到可信來源 IP。",
+    prevention: "EC2 first deploy runbook 記錄 key 權限與 SG 臨時規則到期時間。",
+    examMapping: ["Security least privilege", "EC2 operations"]
+  },
+  {
+    title: "EC2: compose restart policy missing",
+    stageKey: "deployment",
+    relatedDays: [4],
+    skillArea: "ECS",
+    symptom: "EC2 reboot 後服務沒有恢復，public health 變成 connection refused。",
+    evidence: "docker compose ps 沒有 containers；compose file 沒有 restart policy，Docker daemon 未 enable。",
+    correctDiagnosis: "EC2 compose stack 缺少 restart strategy 和 daemon enablement。",
+    choices: diagnose("EC2 compose stack 缺少 restart strategy 和 daemon enablement。", ["RDS public access 太嚴格。", "CloudFront OAC 缺失。", "tenant_id query 沒加 index。"]),
+    fix: "設定 Docker daemon enable、compose restart policy，或進一步遷移到 ECS service desired count。",
+    prevention: "Day 4 rollback/recovery note 要包含 reboot recovery。",
+    examMapping: ["CloudOps operations", "EC2 first deploy"]
+  },
+  {
+    title: "ECS: task cannot start",
+    stageKey: "advanced",
+    relatedDays: [7, 8, 11],
+    skillArea: "ECS",
+    symptom: "ECS service desiredCount=2，但 runningCount=0，task 一直 stopped。",
+    evidence: "stopped reason 顯示 CannotPullContainerError 或 secret access denied。",
+    correctDiagnosis: "task execution role 無法拉 ECR image 或讀取 secret。",
+    choices: diagnose("task execution role 無法拉 ECR image 或讀取 secret。", ["CloudFront index.html cache 太久。", "NAT/RDS 成本太高。", "S3 URL TTL 太短。"]),
+    fix: "檢查 execution role、ECR image URI、Secrets Manager/SSM ARN、subnet/NAT route。",
+    prevention: "Day 8 task definition checklist 加入 image pull、secret reference、logs 權限檢查。",
+    examMapping: ["SAA-C03", "DVA-C02", "CloudOps Engineer Associate (SOA-C03)"]
+  },
+  {
+    title: "ECS: target unhealthy",
+    stageKey: "advanced",
+    relatedDays: [8, 9],
+    skillArea: "Networking",
+    symptom: "ECS task running，但 ALB target group 顯示 unhealthy，使用者看到 503。",
+    evidence: "describe-target-health reason: Health checks failed with these codes: [500]。",
+    correctDiagnosis: "health endpoint、container port、SG path 或 app readiness 不符合 target group 設定。",
+    choices: diagnose("health endpoint、container port、SG path 或 app readiness 不符合 target group 設定。", ["ECR lifecycle policy 太短。", "Portfolio report 沒截圖。", "RPO 設太長。"]),
+    fix: "修 /health、target group port/matcher、ALB SG -> app SG rule，並檢查 Laravel logs。",
+    prevention: "Day 9 failure diagnosis matrix 必須列 502/503/unhealthy 對應檢查點。",
+    examMapping: ["SAA-C03 resilient architectures", "CloudOps troubleshooting"]
+  },
+  {
+    title: "ECS: log driver missing",
+    stageKey: "advanced",
+    relatedDays: [8, 15],
+    skillArea: "Observability",
+    symptom: "task 失敗後找不到 CloudWatch logs，只看到 stopped task。",
+    evidence: "task definition 沒有 awslogs logConfiguration 或 log group 不存在。",
+    correctDiagnosis: "task definition 缺少 log driver/log group mapping。",
+    choices: diagnose("task definition 缺少 log driver/log group mapping。", ["ALB DNS 沒 CNAME。", "tenant_id scope 過寬。", "S3 bucket policy 太嚴格。"]),
+    fix: "在 containerDefinition 加 awslogs driver、log group、region、stream prefix，並給 execution role logs 權限。",
+    prevention: "Day 8/15 將 log group mapping 設為 deploy gate。",
+    examMapping: ["CloudOps Engineer Associate (SOA-C03)", "Observability"]
+  },
+  {
+    title: "RDS: public access enabled",
+    stageKey: "deep-dive",
+    relatedDays: [5, 6, 16],
+    skillArea: "Security",
+    symptom: "安全審查發現 RDS public accessible=true，SG 還開 0.0.0.0/0:5432。",
+    evidence: "describe-db-instances 和 describe-security-groups 顯示資料庫暴露在 Internet。",
+    correctDiagnosis: "資料層違反 private subnet 與 least privilege 原則。",
+    choices: diagnose("資料層違反 private subnet 與 least privilege 原則。", ["CloudWatch alarm 太敏感。", "React env 沒有 API URL。", "GitHub Pages base path 錯。"]),
+    fix: "關閉 public access，RDS 放 private subnet，只允許 app security group。",
+    prevention: "Day 6 SG matrix 和 Day 16 security audit 必須阻擋 public DB。",
+    examMapping: ["SAA-C03 secure architectures", "Security Specialty intro"]
+  },
+  {
+    title: "RDS: SG not reachable",
+    stageKey: "advanced",
+    relatedDays: [5, 6, 18],
+    skillArea: "Data",
+    symptom: "ECS app log 顯示 DB connection timeout，但 RDS instance 狀態 available。",
+    evidence: "RDS SG 沒有允許 app SG 到 5432；或 app task 在錯誤 subnet。",
+    correctDiagnosis: "app-to-RDS security group/subnet path 不通。",
+    choices: diagnose("app-to-RDS security group/subnet path 不通。", ["S3 signed URL 過期。", "WebSocket idle timeout。", "Release note 缺 approver。"]),
+    fix: "允許 app SG 到 RDS SG 的 DB port，檢查 subnet route 和 DNS resolution。",
+    prevention: "Day 6 network diagram 和 Day 5 extraction plan 要包含 connectivity test。",
+    examMapping: ["Networking", "RDS operations"]
+  },
+  {
+    title: "RDS: migration failed",
+    stageKey: "deep-dive",
+    relatedDays: [18, 24],
+    skillArea: "Data",
+    symptom: "deploy 後 Laravel API 500，worker 也開始失敗，migration log 顯示 column not found。",
+    evidence: "新舊 task 並存期間 schema 不相容；沒有 expand-contract 或 rollback plan。",
+    correctDiagnosis: "breaking migration 沒有經過 migration gate。",
+    choices: diagnose("breaking migration 沒有經過 migration gate。", ["ALB health check 太寬鬆。", "ECR image digest 不存在。", "CloudFront OAC 關閉。"]),
+    fix: "採用 expand-contract、restore snapshot 或 forward-fix，並檢查 affected queries。",
+    prevention: "Day 18 migration runbook + Day 14 deployment gate 必須擋 destructive change。",
+    examMapping: ["DevOps Pro prep", "Reliability pillar"]
+  },
+  {
+    title: "S3: bucket public",
+    stageKey: "deep-dive",
+    relatedDays: [19],
+    skillArea: "Security",
+    symptom: "任何人拿到 object URL 都能下載使用者上傳檔案。",
+    evidence: "get-public-access-block 未啟用；bucket policy status 顯示 public。",
+    correctDiagnosis: "private uploads 被 public bucket policy 繞過 authorization。",
+    choices: diagnose("private uploads 被 public bucket policy 繞過 authorization。", ["ALB target group 不健康。", "worker desired count 太低。", "RDS migration 太慢。"]),
+    fix: "啟用 Block Public Access，改由 Laravel 驗證後簽 presigned URL。",
+    prevention: "Day 19 bucket access checklist 必須檢查 public access、policy、CORS、TTL。",
+    examMapping: ["Security / SAA", "S3 secure access"]
+  },
+  {
+    title: "S3: CORS wrong",
+    stageKey: "deep-dive",
+    relatedDays: [12, 19],
+    skillArea: "Data",
+    symptom: "frontend 取得 presigned upload URL 後，browser preflight 被 S3 擋下。",
+    evidence: "OPTIONS request 回 CORS error；bucket CORS 沒允許 CloudFront/frontend origin 或 PUT header。",
+    correctDiagnosis: "S3 CORS rule 不符合前端 direct upload request。",
+    choices: diagnose("S3 CORS rule 不符合前端 direct upload request。", ["APP_DEBUG=false。", "ECS task role 太小。", "RPO 太短。"]),
+    fix: "設定必要 origin、method、headers，不使用 wildcard 放寬所有來源。",
+    prevention: "Day 19 signed URL policy 加上 CORS regression test。",
+    examMapping: ["S3 CORS", "frontend deployment"]
+  },
+  {
+    title: "S3: signed URL expired",
+    stageKey: "deep-dive",
+    relatedDays: [19],
+    skillArea: "Security",
+    symptom: "使用者上傳大檔到一半收到 403 SignatureDoesNotMatch 或 ExpiredToken。",
+    evidence: "presigned URL expires-in 太短，或 client clock/request method/header 和簽名不一致。",
+    correctDiagnosis: "signed URL TTL 或簽名條件不符合實際 upload 行為。",
+    choices: diagnose("signed URL TTL 或簽名條件不符合實際 upload 行為。", ["RDS SG public。", "ECS desired count 太高。", "CloudTrail 沒有 event。"]),
+    fix: "依檔案大小調整 TTL，固定 method/content-type，失敗時重新請求 URL。",
+    prevention: "Day 19 policy 要明確 TTL、content-type、size 和 retry flow。",
+    examMapping: ["S3 presigned URL", "Security / SAA"]
+  },
+  {
+    title: "CloudFront: cache stale",
+    stageKey: "advanced",
+    relatedDays: [12],
+    skillArea: "CI/CD",
+    symptom: "部署 React 新版後，使用者仍看到舊畫面或舊 JS bundle reference。",
+    evidence: "CloudFront HIT 舊 index.html；asset hash 已變但 index.html cache policy 太長。",
+    correctDiagnosis: "index.html cache policy/invalidation 沒處理。",
+    choices: diagnose("index.html cache policy/invalidation 沒處理。", ["RDS snapshot restore 失敗。", "worker idempotency 缺失。", "tenant query scope 缺失。"]),
+    fix: "dist sync 後 invalidation index.html 或 /*，asset 使用 hash 並調整 cache policy。",
+    prevention: "Day 12 checklist 包含 cache invalidation evidence。",
+    examMapping: ["SAA-C03 content delivery", "DVA-C02 deployment"]
+  },
+  {
+    title: "CloudFront: API URL wrong",
+    stageKey: "advanced",
+    relatedDays: [12],
+    skillArea: "Networking",
+    symptom: "前端頁面可載入，但 API calls 打到 localhost 或 staging domain。",
+    evidence: "browser network tab 顯示 VITE_API_URL 被 build 成錯誤 endpoint。",
+    correctDiagnosis: "React public runtime config/API URL 在 build/deploy 階段錯誤。",
+    choices: diagnose("React public runtime config/API URL 在 build/deploy 階段錯誤。", ["RDS migration rollback 不完整。", "CloudWatch alarm 沒 threshold。", "SSH key 權限太寬。"]),
+    fix: "在 CI build 明確注入 production API URL，並把 frontend config 視為 public config。",
+    prevention: "Day 12 API URL/CORS note 和 Day 13 pipeline env gate 必須檢查。",
+    examMapping: ["Frontend deployment", "DVA-C02"]
+  },
+  {
+    title: "CloudFront: invalidation missing",
+    stageKey: "advanced",
+    relatedDays: [12, 13],
+    skillArea: "CI/CD",
+    symptom: "GitHub Actions deploy 成功，但 CDN 還是回舊版 index。",
+    evidence: "workflow 沒有 aws cloudfront create-invalidation step；CloudFront edge cache 未更新。",
+    correctDiagnosis: "frontend pipeline 缺少 cache invalidation 或 cache policy 控制。",
+    choices: diagnose("frontend pipeline 缺少 cache invalidation 或 cache policy 控制。", ["ECS task role 無法讀 secret。", "S3 bucket public。", "DB_HOST=localhost。"]),
+    fix: "在 pipeline 加入 CloudFront invalidation，或設定 index.html 短 cache/版本策略。",
+    prevention: "Day 13 workflow sketch 要包含 frontend deploy verification。",
+    examMapping: ["CI/CD", "CloudFront operations"]
+  },
+  {
+    title: "CI/CD: latest tag rollback",
+    stageKey: "advanced",
+    relatedDays: [7, 13, 14],
+    skillArea: "CI/CD",
+    symptom: "部署出錯後想 rollback，但 ECS task definition 只記錄 image:latest。",
+    evidence: "ECR 有多個 image，但 latest 已被覆蓋，不知道前一版內容。",
+    correctDiagnosis: "pipeline 沒有使用 immutable commit SHA image tag。",
+    choices: diagnose("pipeline 沒有使用 immutable commit SHA image tag。", ["RDS SG 沒開。", "CloudFront origin path 錯。", "APP_DEBUG=false。"]),
+    fix: "使用 commit SHA tag/digest render task definition，保存 previous task definition revision。",
+    prevention: "Day 7 image tag policy 和 Day 13 deploy workflow 必須保存 rollback table。",
+    examMapping: ["DVA-C02 deployment", "DevOps governance"]
+  },
+  {
+    title: "CI/CD: OIDC/IAM permission",
+    stageKey: "advanced",
+    relatedDays: [11, 13, 26],
+    skillArea: "Security",
+    symptom: "GitHub Actions 在 configure-aws-credentials 失敗，或使用長期 AWS key 被審查退回。",
+    evidence: "role trust policy 沒允許 repo/ref，或 repo secrets 放 long-lived key。",
+    correctDiagnosis: "CI/CD AWS access 沒使用正確 OIDC trust/IAM least privilege。",
+    choices: diagnose("CI/CD AWS access 沒使用正確 OIDC trust/IAM least privilege。", ["ALB health path 回 500。", "S3 URL TTL 太短。", "N+1 query 太多。"]),
+    fix: "設定 GitHub OIDC provider、role trust condition、least privilege deploy policy。",
+    prevention: "Day 13/26 將 OIDC 和 approval gate 放入 release governance。",
+    examMapping: ["DVA-C02 Security", "Governance"]
+  },
+  {
+    title: "Observability: logs missing",
+    stageKey: "advanced",
+    relatedDays: [8, 15],
+    skillArea: "Observability",
+    symptom: "production 500 發生，但 CloudWatch 找不到 web/worker logs。",
+    evidence: "log group 不存在、retention 未設定、task definition 沒 awslogs。",
+    correctDiagnosis: "observability baseline 沒有在 task definition 和 log group 建立。",
+    choices: diagnose("observability baseline 沒有在 task definition 和 log group 建立。", ["S3 bucket public。", "Route table 沒 IGW。", "tenant selector 錯。"]),
+    fix: "建立 web/worker/scheduler log group，設定 awslogs driver 和 retention。",
+    prevention: "Day 15 post-deploy acceptance 必須檢查 logs 可用。",
+    examMapping: ["CloudOps Engineer Associate (SOA-C03)", "Observability"]
+  },
+  {
+    title: "Observability: alarm threshold wrong",
+    stageKey: "deep-dive",
+    relatedDays: [15, 22, 27],
+    skillArea: "Observability",
+    symptom: "使用者已大量回報 500，但 alarm 沒有觸發；或少量測試就一直 alarm。",
+    evidence: "threshold 沒考慮 request volume、evaluation periods、ALB 5xx rate。",
+    correctDiagnosis: "alarm 門檻沒有對齊實際 SLO/traffic pattern。",
+    choices: diagnose("alarm 門檻沒有對齊實際 SLO/traffic pattern。", ["Dockerfile 沒 COPY source。", "SSH key 權限太寬。", "CloudFront API URL 錯。"]),
+    fix: "用 rate/ratio、evaluation period、severity 分級調整 alarm，並連到 runbook。",
+    prevention: "Day 15/27 設定 deployment acceptance thresholds 和 performance budget。",
+    examMapping: ["CloudOps Engineer Associate (SOA-C03)", "Performance pillar"]
+  },
+  {
+    title: "Observability: dashboard unavailable",
+    stageKey: "deep-dive",
+    relatedDays: [15, 28],
+    skillArea: "Observability",
+    symptom: "incident 發生時，團隊不知道看哪個 dashboard 或哪些 metric。",
+    evidence: "dashboard 缺少 release version、traffic、error、latency、queue、database。",
+    correctDiagnosis: "dashboard 沒有對齊 production readiness 和 incident triage。",
+    choices: diagnose("dashboard 沒有對齊 production readiness 和 incident triage。", ["S3 CORS 太窄。", "ECR latest tag 太舊。", "DB_HOST=service name。"]),
+    fix: "建立 post-deploy dashboard，涵蓋 ALB/ECS/RDS/queue/logs/release version。",
+    prevention: "Day 28 architecture review 要把 observability evidence 列入風險表。",
+    examMapping: ["Well-Architected operations pillar", "CloudOps"]
+  },
+  {
+    title: "DR: snapshot restore not verified",
+    stageKey: "deep-dive",
+    relatedDays: [24],
+    skillArea: "Cost/DR",
+    symptom: "RDS 有自動備份，但事故時 restore 後 app 無法連線，DNS/env 切換也沒文件。",
+    evidence: "沒有 restore drill、沒有 validation checklist、restore instance endpoint 沒接到 app config。",
+    correctDiagnosis: "只有 backup，沒有被驗證過的 restore runbook。",
+    choices: diagnose("只有 backup，沒有被驗證過的 restore runbook。", ["ALB target group matcher 太寬。", "React env 是 public config。", "worker scaling 太慢。"]),
+    fix: "演練 restore-db-instance-from-db-snapshot，驗證資料、切換 endpoint、記錄 RTO。",
+    prevention: "Day 24 DR drill evidence plan 必須定期執行。",
+    examMapping: ["Reliability pillar", "DR runbook"]
+  },
+  {
+    title: "DR: RTO/RPO unrealistic",
+    stageKey: "deep-dive",
+    relatedDays: [23, 24, 30],
+    skillArea: "Cost/DR",
+    symptom: "主管要求 5 分鐘 RTO/RPO，但目前只有每日 snapshot 和手動 restore。",
+    evidence: "backup frequency、restore time、DNS propagation、app validation 都無法滿足 5 分鐘。",
+    correctDiagnosis: "RTO/RPO 目標和目前架構/成本不匹配。",
+    choices: diagnose("RTO/RPO 目標和目前架構/成本不匹配。", ["APP_KEY 沒有注入。", "CloudFront invalidation 太慢。", "Docker port collision。"]),
+    fix: "重新定義 business RTO/RPO，或投資更高等級 DR 架構與成本。",
+    prevention: "Day 23 cost review 和 Day 24 DR table 要一起答辯 trade-off。",
+    examMapping: ["Reliability pillar", "Cost optimization", "Capstone defense"]
   }
 ];
 

@@ -40,7 +40,11 @@ import {
   seedTenants,
   seedUsers,
   zeroStartSteps,
-  type Lesson
+  type InteractiveScenario,
+  type Lesson,
+  type QuizQuestion,
+  type SkillArea,
+  type StageKey
 } from "./data";
 
 type View = "auth" | "dashboard" | "roadmap" | "lesson" | "scenario" | "lab" | "quiz" | "progress" | "glossary" | "admin";
@@ -425,9 +429,12 @@ function App() {
     updateTenantProgress({ ...progress, onboardingDone });
   };
 
-  const submitQuiz = () => {
-    const correct = quizQuestions.filter((question) => quizAnswers[question.id] === question.answer).length;
-    const score = Math.round((correct / quizQuestions.length) * 100);
+  const submitQuiz = (questionIds?: string[]) => {
+    const scopedQuestions = questionIds?.length
+      ? quizQuestions.filter((question) => questionIds.includes(question.id))
+      : quizQuestions;
+    const correct = scopedQuestions.filter((question) => quizAnswers[question.id] === question.answer).length;
+    const score = scopedQuestions.length ? Math.round((correct / scopedQuestions.length) * 100) : 0;
     setQuizResult(score);
     updateTenantProgress({ ...progress, quizScores: [...progress.quizScores, score] });
   };
@@ -542,7 +549,7 @@ function App() {
         {view === "lesson" && <LessonView lesson={lesson} progress={progress} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
         {view === "scenario" && <ScenarioBuilder tenant={activeTenant} />}
         {view === "lab" && <InteractiveLab />}
-        {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} />}
+        {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} openLesson={openLesson} />}
         {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} tenant={activeTenant} />}
         {view === "glossary" && <Glossary />}
         {view === "admin" && <AdminDashboard store={store} activeTenant={activeTenant} onLogout={signOut} />}
@@ -2374,48 +2381,235 @@ function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
 
 function InteractiveLab() {
   const [selected, setSelected] = useState(0);
+  const [diagnoses, setDiagnoses] = useState<Record<string, string>>({});
   const lab = labs[selected];
+  const chosen = diagnoses[lab.title];
+  const isCorrect = chosen === lab.correctDiagnosis;
+  const stageLabels: Record<StageKey, string> = {
+    deployment: "Deployment Day 1-5",
+    advanced: "Advanced Day 6-15",
+    "deep-dive": "Deep Dive Day 16-30"
+  };
+
   return (
     <section className="stack">
-      <SectionHeader title="互動模式 / Interactive Lab" desc="用真實部署錯誤練習 diagnosis and solution。" />
+      <SectionHeader title="互動模式 / Interactive Lab" desc={`${labs.length} 個真實部署故障情境。先選診斷，再看修復與預防。`} />
       <div className="grid two uneven">
         <Panel title="Debug Scenarios">
+          <div className="lab-summary-strip">
+            <span>{labs.filter((item) => item.stageKey === "deployment").length} Deployment</span>
+            <span>{labs.filter((item) => item.stageKey === "advanced").length} Advanced</span>
+            <span>{labs.filter((item) => item.stageKey === "deep-dive").length} Deep Dive</span>
+          </div>
           {labs.map((item, index) => (
             <button key={item.title} className={`row-button ${selected === index ? "selected" : ""}`} onClick={() => setSelected(index)}>
-              <TerminalSquare size={18} /> {item.title}
+              <TerminalSquare size={18} />
+              <span>
+                <strong>{item.title}</strong>
+                <small>{stageLabels[item.stageKey]} · Day {item.relatedDays.join(", ")}</small>
+              </span>
             </button>
           ))}
         </Panel>
         <Panel title={lab.title}>
-          <p>{lab.description}</p>
-          <div className="hint"><strong>Hint</strong>{lab.hint}</div>
-          <div className="hint"><strong>Diagnosis</strong>{lab.diagnosis}</div>
-          <div className="hint success"><strong>Solution</strong>{lab.solution}</div>
+          <div className="scenario-meta">
+            <span>{stageLabels[lab.stageKey]}</span>
+            <span>{lab.skillArea}</span>
+            <span>Day {lab.relatedDays.join(", ")}</span>
+          </div>
+          <div className="hint"><strong>Symptom</strong>{lab.symptom}</div>
+          <div className="hint"><strong>Evidence</strong>{lab.evidence}</div>
+          <div className="diagnosis-options">
+            <strong>選擇你的診斷 / Choose diagnosis</strong>
+            {lab.choices.map((choice) => {
+              const active = chosen === choice;
+              const reveal = Boolean(chosen);
+              const correct = choice === lab.correctDiagnosis;
+              return (
+                <button
+                  key={choice}
+                  className={`diagnosis-choice ${active ? "active" : ""} ${reveal && correct ? "correct" : ""} ${reveal && active && !correct ? "wrong" : ""}`}
+                  onClick={() => setDiagnoses({ ...diagnoses, [lab.title]: choice })}
+                >
+                  {choice}
+                </button>
+              );
+            })}
+          </div>
+          {chosen && (
+            <div className={isCorrect ? "hint success" : "hint danger"}>
+              <strong>{isCorrect ? "Correct Diagnosis" : "Review Diagnosis"}</strong>
+              {lab.correctDiagnosis}
+            </div>
+          )}
+          {chosen && (
+            <div className="lab-remediation-grid">
+              <div className="hint success"><strong>Fix</strong>{lab.fix}</div>
+              <div className="hint"><strong>Prevention</strong>{lab.prevention}</div>
+            </div>
+          )}
+          <div className="exam-mapping-block">
+            <strong>Exam Mapping / 能力對照</strong>
+            <div className="exam-chip-row">
+              {lab.examMapping.map((item) => <span key={item}>{item}</span>)}
+            </div>
+          </div>
         </Panel>
       </div>
     </section>
   );
 }
 
-function QuizView({ answers, setAnswers, result, submitQuiz }: { answers: Record<string, string>; setAnswers: (answers: Record<string, string>) => void; result: number | null; submitQuiz: () => void }) {
+function QuizView({
+  answers,
+  setAnswers,
+  result,
+  submitQuiz,
+  openLesson
+}: {
+  answers: Record<string, string>;
+  setAnswers: (answers: Record<string, string>) => void;
+  result: number | null;
+  submitQuiz: (questionIds?: string[]) => void;
+  openLesson: (day: number) => void;
+}) {
+  const [stageFilter, setStageFilter] = useState<"all" | StageKey>("deployment");
+  const [skillFilter, setSkillFilter] = useState<"all" | SkillArea>("all");
+  const [mode, setMode] = useState<"daily" | "stage" | "all">("daily");
+  const visibleQuestions = quizQuestions.filter((question) => {
+    const stageMatch = stageFilter === "all" || question.stageKey === stageFilter;
+    const skillMatch = skillFilter === "all" || question.skillArea === skillFilter;
+    const modeMatch =
+      mode === "all" ||
+      (mode === "daily" && typeof question.day === "number") ||
+      (mode === "stage" && typeof question.day !== "number");
+    return stageMatch && skillMatch && modeMatch;
+  });
+  const wrongQuestions = result === null ? [] : visibleQuestions.filter((question) => answers[question.id] !== question.answer);
+  const weaknessRows = Object.entries(
+    wrongQuestions.reduce<Record<string, number>>((acc, question) => {
+      acc[question.skillArea] = (acc[question.skillArea] ?? 0) + 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1] - a[1]);
+  const stageCounts = {
+    deployment: quizQuestions.filter((question) => question.stageKey === "deployment").length,
+    advanced: quizQuestions.filter((question) => question.stageKey === "advanced").length,
+    "deep-dive": quizQuestions.filter((question) => question.stageKey === "deep-dive").length
+  };
+  const skillAreas: SkillArea[] = ["Docker", "ECS", "Networking", "Data", "CI/CD", "Observability", "Security", "Cost/DR"];
+
   return (
     <section className="stack">
-      <SectionHeader title="測驗模式 / Quiz Mode" desc="測驗 Docker Compose、AWS deployment、security、cost awareness。" />
-      {quizQuestions.map((question) => (
+      <SectionHeader title="測驗模式 / Quiz Mode" desc={`${quizQuestions.length} 題情境式題庫：每日 quick check + stage exam，錯題會回到 lesson day。`} />
+      <Panel title="Quiz Filters / 題庫篩選">
+        <div className="quiz-filter-grid">
+          <div>
+            <strong>Mode</strong>
+            <div className="segmented">
+              {[
+                ["daily", "每日題"],
+                ["stage", "階段考"],
+                ["all", "全部"]
+              ].map(([value, label]) => (
+                <button key={value} className={mode === value ? "active" : ""} onClick={() => setMode(value as typeof mode)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <strong>Stage</strong>
+            <div className="segmented">
+              {[
+                ["deployment", `Deployment ${stageCounts.deployment}`],
+                ["advanced", `Advanced ${stageCounts.advanced}`],
+                ["deep-dive", `Deep Dive ${stageCounts["deep-dive"]}`],
+                ["all", "All"]
+              ].map(([value, label]) => (
+                <button key={value} className={stageFilter === value ? "active" : ""} onClick={() => setStageFilter(value as typeof stageFilter)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <strong>Skill Weakness</strong>
+            <select value={skillFilter} onChange={(event) => setSkillFilter(event.target.value as typeof skillFilter)}>
+              <option value="all">All skills</option>
+              {skillAreas.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="quiz-count-row">
+          <span>目前題數：{visibleQuestions.length}</span>
+          <span>Daily quick check：{quizQuestions.filter((question) => typeof question.day === "number").length}</span>
+          <span>Stage exam：{quizQuestions.filter((question) => typeof question.day !== "number").length}</span>
+        </div>
+      </Panel>
+
+      {result !== null && (
+        <Panel title="Weakness Analysis / 弱點分析">
+          <div className="weakness-grid">
+            <div className="result-card">
+              <strong>{result}%</strong>
+              <span>Score on current filter</span>
+            </div>
+            <div>
+              <strong>需要補強的能力</strong>
+              {weaknessRows.length ? (
+                <div className="exam-chip-row weakness-chips">
+                  {weaknessRows.map(([area, count]) => <span key={area}>{area}: {count} wrong</span>)}
+                </div>
+              ) : (
+                <p className="success-copy">目前篩選題組沒有錯題。保持這個節奏，很漂亮。</p>
+              )}
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {visibleQuestions.map((question: QuizQuestion) => {
+        const answered = answers[question.id];
+        const isWrong = result !== null && answered !== question.answer;
+        return (
         <Panel key={question.id} title={question.prompt}>
+          <div className="question-meta">
+            <span>{question.day ? `Day ${question.day}` : "Stage Exam"}</span>
+            <span>{question.stageKey}</span>
+            <span>{question.skillArea}</span>
+          </div>
           <p>{question.promptEn}</p>
           <div className="options">
             {question.options.map((option) => (
-              <label key={option} className={answers[question.id] === option ? "option active-option" : "option"}>
+              <label key={option} className={`${answers[question.id] === option ? "option active-option" : "option"} ${result !== null && option === question.answer ? "correct-option" : ""} ${result !== null && answered === option && option !== question.answer ? "wrong-option" : ""}`}>
                 <input type="radio" name={question.id} checked={answers[question.id] === option} onChange={() => setAnswers({ ...answers, [question.id]: option })} />
                 {option}
               </label>
             ))}
           </div>
-          {result !== null && <div className="notice">{question.explanation}</div>}
+          {result !== null && (
+            <div className={isWrong ? "notice danger" : "notice success"}>
+              {question.explanation}
+              {question.remediationLessonDays?.length ? (
+                <div className="remediation-links">
+                  {question.remediationLessonDays.map((day) => {
+                    const lesson = allLessons.find((item) => item.day === day);
+                    return (
+                      <button key={`${question.id}-${day}`} className="secondary" onClick={() => openLesson(day)}>
+                        回 Day {day}{lesson ? ` · ${lesson.title}` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {question.examMapping?.length ? (
+                <div className="exam-chip-row">
+                  {question.examMapping.map((item) => <span key={item}>{item}</span>)}
+                </div>
+              ) : null}
+            </div>
+          )}
         </Panel>
-      ))}
-      <button className="primary wide" onClick={submitQuiz}>提交測驗 / Submit Quiz</button>
+        );
+      })}
+      <button className="primary wide" onClick={() => submitQuiz(visibleQuestions.map((question) => question.id))}>提交目前題組 / Submit Current Quiz</button>
       {result !== null && <div className="result">Score / 分數：{result}%</div>}
     </section>
   );
