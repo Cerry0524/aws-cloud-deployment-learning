@@ -826,6 +826,12 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
     return progress.currentDay >= stage.startDay && progress.currentDay <= stage.endDay;
   };
 
+  const jumpToStage = (stageKey: string) => {
+    const target = document.getElementById(`roadmap-stage-${stageKey}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => target?.focus({ preventScroll: true }), 320);
+  };
+
   return (
     <section className="stack">
       <SectionHeader title="30天課程路線圖 / 30-Day Roadmap" desc="Day 1-5 部署落地，Day 6-15 進階 production 化，Day 16-30 深入架構與營運。" />
@@ -842,13 +848,20 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
             const done = isStageDone(stage);
             const current = isStageCurrent(stage);
             return (
-              <div key={stage.key} className={`stage-summary-card ${current ? "stage-current" : ""}`}>
+              <button
+                type="button"
+                key={stage.key}
+                className={`stage-summary-card ${current ? "stage-current" : ""}`}
+                onClick={() => jumpToStage(stage.key)}
+                aria-label={`跳到 ${stage.title} Day ${stage.startDay} 到 Day ${stage.endDay} 每日進度`}
+              >
                 <strong>{stage.title}</strong>
                 <span>{stage.titleEn}</span>
                 <small>{stage.objective}</small>
                 <strong className="stage-range">Day {stage.startDay} - Day {stage.endDay}</strong>
                 <small>{done ? "已完成 / Completed" : current ? "目前進行中" : "尚未開始"}</small>
-              </div>
+                <span className="stage-jump-hint">查看 Day {stage.startDay}-{stage.endDay} ↓</span>
+              </button>
             );
           })}
         </div>
@@ -866,7 +879,7 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
         {roadmapSections.map((stage) => {
           const lessons = allLessons.filter((lesson) => lesson.day >= stage.startDay && lesson.day <= stage.endDay);
           return (
-            <section key={stage.key} className="roadmap-stage">
+            <section key={stage.key} id={`roadmap-stage-${stage.key}`} className="roadmap-stage" tabIndex={-1}>
               <div className="roadmap-stage-head">
                 <div>
                   <h3>
