@@ -112,6 +112,7 @@ See:
 
 - [Curriculum Intensity Spec](docs/curriculum-intensity-spec.md)
 - [AWS Current Reference Notes](docs/aws-current-reference-notes.md)
+- [互動式導師使用說明](docs/interactive-mentor-usage.md)
 
 ## Build
 

@@ -1,5 +1,67 @@
 export type Phase = "Deployment" | "Advanced" | "Deep Dive";
 
+export type RoadmapSection = {
+  key: string;
+  title: string;
+  titleEn: string;
+  startDay: number;
+  endDay: number;
+  objective: string;
+};
+
+export const roadmapSections: RoadmapSection[] = [
+  {
+    key: "deployment",
+    title: "部署落地",
+    titleEn: "Deployment",
+    startDay: 1,
+    endDay: 5,
+    objective: "把 Docker Compose 專案變成可驗證、可回滾、可交付的部署資產。"
+  },
+  {
+    key: "advanced",
+    title: "進階 Production 化",
+    titleEn: "Advanced Production",
+    startDay: 6,
+    endDay: 15,
+    objective: "把 container、網路、資料層與 CI/CD 拆成 AWS 可維運邊界。"
+  },
+  {
+    key: "deep-dive",
+    title: "深入營運與治理",
+    titleEn: "Deep Dive Operations",
+    startDay: 16,
+    endDay: 30,
+    objective: "強化安全、可靠性、成本與答辯能力，形成能被審查的 production-ready 作品。"
+  }
+];
+
+export type MentorStep = {
+  id: string;
+  title: string;
+  instruction: string;
+  expectedResult: string;
+  commonMistake: string;
+  mentorQuestion: string;
+};
+
+export type MentorQuestion = {
+  id: string;
+  question: string;
+  answer: string;
+};
+
+export type MentorScript = {
+  scenario: string;
+  whyItMatters: string;
+  todayGoal: string;
+  previousContext: string;
+  nextContext: string;
+  guidedSteps: MentorStep[];
+  quickQuestions: MentorQuestion[];
+  deliverables: string[];
+};
+
 export type Lesson = {
   day: number;
   phase: Phase;
@@ -17,6 +79,7 @@ export type Lesson = {
   acceptance: string[];
   expectedOutcome: string;
   sourceNotes: string[];
+  mentorScript: MentorScript;
 };
 
 const deploymentTopics = [
@@ -122,6 +185,153 @@ const sourceNotesForDay = (day: number, titleEn: string) => {
   return notes;
 };
 
+const dayOneMentorScript: MentorScript = {
+  scenario:
+    "你手上有一個 Laravel + React + PostgreSQL + Redis 的 Docker Compose 專案。有人問你：這個可以部署到 AWS 嗎？今天先不要急著回答可以，因為你還不知道哪些東西是 app、哪些是資料、哪些不能丟。",
+  whyItMatters:
+    "AWS 部署不是把 docker-compose.yml 丟到雲端就結束。你需要先知道服務、port、volume、env 與資料責任，後面才能判斷什麼要進 ECS、什麼要進 RDS、什麼要進 S3。",
+  todayGoal:
+    "產出第一份 Deployment Inventory，讓後面的 EC2、ECS、RDS、S3、Secrets Manager 都有依據。",
+  previousContext:
+    "這是第一天，所以我們從本機 Docker Compose 專案盤點開始。",
+  nextContext:
+    "Day 2 會用這份盤點啟動 production-like 本機環境，確認服務能被穩定驗證。",
+  guidedSteps: [
+    {
+      id: "services",
+      title: "找出 services",
+      instruction: "打開 docker-compose.yml，列出每個 top-level service，先不要急著判斷 AWS 架構。",
+      expectedResult: "得到一張 service name 與責任說明表，例如 frontend、api、database、redis、worker。",
+      commonMistake: "把所有 container 都當成同一種 workload，導致後面 ECS service、RDS、Redis 的責任切不清楚。",
+      mentorQuestion: "哪些 service 是 application runtime？哪些 service 是 data infrastructure？"
+    },
+    {
+      id: "ports",
+      title: "找出 ports",
+      instruction: "檢查 compose 裡的 ports，並執行 docker-compose config --services 輔助確認服務清單。",
+      expectedResult: "列出哪些 port 是給瀏覽器或 ALB 進來，哪些只應該在內部 network 使用。",
+      commonMistake: "看到 service 有 port 就以為它一定要公開到網路，結果 security group 開太大。",
+      mentorQuestion: "未來 ALB 需要打到哪一個 port？資料庫 port 需要公開嗎？"
+    },
+    {
+      id: "volumes",
+      title: "找出 volumes",
+      instruction: "檢查 named volumes、bind mounts、storage 目錄與 database data 目錄。",
+      expectedResult: "列出 container 重建後不能消失的資料，例如 database、uploads、logs 或 cache。",
+      commonMistake: "把 uploads 或 database files 只放在 disposable container 裡，重建後資料就不見。",
+      mentorQuestion: "哪些資料之後應該搬到 RDS、S3、EFS 或 ElastiCache？"
+    },
+    {
+      id: "env",
+      title: "找出環境變數",
+      instruction: "檢查 .env、compose environment 與 Laravel / React config，分出 secret 與 non-secret。",
+      expectedResult: "得到一份 secret/config classification，例如 APP_KEY、DB_PASSWORD、API_URL。",
+      commonMistake: "把 APP_KEY、database password 或 API token 打包進 image 或 commit 到 Git。",
+      mentorQuestion: "哪些值未來應該放到 Secrets Manager 或 SSM Parameter Store？"
+    },
+    {
+      id: "mapping",
+      title: "草擬 AWS mapping",
+      instruction: "把每個本機元件映射到未來 AWS service，先寫草稿，不追求最終答案。",
+      expectedResult: "得到第一版 AWS deployment map，例如 React -> S3/CloudFront、Laravel -> ECS、PostgreSQL -> RDS。",
+      commonMistake: "還沒理解 stateful dependencies 就直接跳到 ECS，最後 database、storage、queue 全部卡住。",
+      mentorQuestion: "哪些東西可以跑在 container？哪些應該改用 AWS managed infrastructure？"
+    }
+  ],
+  quickQuestions: [
+    {
+      id: "why-inventory",
+      question: "為什麼 Day 1 不直接部署？",
+      answer:
+        "因為部署前要先知道專案由哪些服務和資料組成。沒有 inventory，就無法正確設計 ECS service、RDS、S3、Redis、security group，也無法 rollback。"
+    },
+    {
+      id: "what-is-port",
+      question: "port 到底要看什麼？",
+      answer:
+        "你要分辨誰需要對外、誰只能內部使用。未來 ALB 只應該打到 web/API runtime，database 和 Redis 通常不應公開。"
+    },
+    {
+      id: "what-is-volume",
+      question: "volume 為什麼重要？",
+      answer:
+        "container 可以被重建，所以資料不能只靠 container filesystem。volume 代表你要特別處理的持久化責任，後面通常會映射到 RDS、S3、EFS 或其他 managed service。"
+    }
+  ],
+  deliverables: [
+    "Deployment Inventory table",
+    "Port map",
+    "Volume 與 persistence map",
+    "Secret / config classification",
+    "第一版 AWS service mapping",
+    "Risk 與 rollback notes"
+  ]
+};
+
+const buildMentorScript = (day: number, title: string, titleEn: string, summary: string, phase: Phase): MentorScript => {
+  if (day === 1) return dayOneMentorScript;
+
+  const stageIntro = day <= 5
+    ? "我們還在部署落地階段，重點是把本機 Docker Compose 專案變成可以被驗證、交付、rollback 的部署 artifact。"
+    : day <= 15
+      ? "我們進入 production 化階段，重點是把本機服務拆成 AWS 上可維護的邊界。"
+      : "我們進入深入營運階段，重點是安全、可靠性、成本、擴展、治理與可說服人的架構取捨。";
+
+  return {
+    scenario: `${stageIntro} 今天的情境是：${summary}`,
+    whyItMatters: `${title} 會影響後續 AWS deployment path。如果這一天只看概念不產出 artifact，後面的架構會缺少可驗證依據。`,
+    todayGoal: `完成 ${titleEn} artifact，讓這一天的學習能被檢查、保存並延續到後續課程。`,
+    previousContext: `Day ${day - 1} 已經完成前一個部署決策或 artifact，今天要在它的基礎上繼續推進。`,
+    nextContext: day < 30
+      ? `Day ${day + 1} 會使用今天的結果繼續處理下一個 AWS deployment concern。`
+      : "這是最後一天，今天的輸出會整理成完整的部署答辯與 portfolio。",
+    guidedSteps: [
+      {
+        id: "read",
+        title: "理解今天的部署問題",
+        instruction: `先閱讀 ${title} 的情境，確認它在 Docker Compose 到 AWS 的路徑中解決什麼問題。`,
+        expectedResult: "你能用自己的話說出今天的問題、影響範圍與不處理會發生什麼事。",
+        commonMistake: "只背 AWS service 名稱，但不知道它解決哪一個部署痛點。",
+        mentorQuestion: "如果今天跳過，後面的部署流程哪裡會失去依據？"
+      },
+      {
+        id: "inspect",
+        title: "對照 TicketFactory 現況",
+        instruction: "回到 docker-compose、Dockerfile、env、Nginx、Laravel config 或 React build 設定，找出今天主題對應的真實位置。",
+        expectedResult: "你能指出至少一個本機檔案、設定或 runtime 行為和今天主題有關。",
+        commonMistake: "把課程當成雲端名詞介紹，沒有回到自己的專案驗證。",
+        mentorQuestion: "這個主題在目前專案中對應到哪個檔案或哪個 runtime 行為？"
+      },
+      {
+        id: "produce",
+        title: "產出今天 artifact",
+        instruction: "依照本日 lab 產出設定、表格、runbook、diagram 或 command result。",
+        expectedResult: "今天有一份可以保存的輸出，而不是只看完文字。",
+        commonMistake: "沒有留下 artifact，導致後面無法追蹤決策原因。",
+        mentorQuestion: "你今天留下的 artifact 是什麼？後面誰會用到它？"
+      }
+    ],
+    quickQuestions: [
+      {
+        id: "why-today",
+        question: "今天為什麼重要？",
+        answer: `${title} 是 ${phase} 階段的一個部署決策點。它讓你把抽象概念轉成可驗證的設定、文件或操作。`
+      },
+      {
+        id: "what-output",
+        question: "我今天要交什麼？",
+        answer: `你今天要交付 ${titleEn} artifact，並且能說明它如何推進 Docker Compose 到 AWS production deployment。`
+      }
+    ],
+    deliverables: [
+      `${titleEn} learning note`,
+      "一份可保存的設定、表格、diagram 或 runbook",
+      "驗證指令或畫面截圖",
+      "常見雷點與 rollback / recovery note"
+    ]
+  };
+};
+
 const buildLesson = (day: number, topic: string[]) => {
   const [title, titleEn, summary] = topic;
   const phase = phaseForDay(day);
@@ -167,7 +377,8 @@ const buildLesson = (day: number, topic: string[]) => {
       "能說明此日內容如何推進 TicketFactory 上 AWS。"
     ],
     expectedOutcome: `${phase} 階段 Day ${day} 完成後，學員會得到一份 ${titleEn} artifact，並能把它放進最終 AWS deployment portfolio。`,
-    sourceNotes: sourceNotesForDay(day, titleEn)
+    sourceNotes: sourceNotesForDay(day, titleEn),
+    mentorScript: buildMentorScript(day, title, titleEn, summary, phase)
   } satisfies Lesson;
 };
 
