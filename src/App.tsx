@@ -17,8 +17,6 @@ import {
   LayoutDashboard,
   ListChecks,
   Lock,
-  LogIn,
-  LogOut,
   Search,
   Server,
   ShieldCheck,
@@ -26,7 +24,6 @@ import {
   Target,
   TerminalSquare,
   Trophy,
-  UserPlus,
   UserRoundCog,
   Users
 } from "lucide-react";
@@ -34,11 +31,8 @@ import { type ReactElement, useEffect, useMemo, useState } from "react";
 import {
   allLessons,
   labs,
-  members,
   quizQuestions,
   roadmapSections,
-  seedTenants,
-  seedUsers,
   zeroStartSteps,
   type InteractiveScenario,
   type Lesson,
@@ -47,24 +41,14 @@ import {
   type StageKey
 } from "./data";
 
-type View = "auth" | "dashboard" | "roadmap" | "lesson" | "scenario" | "lab" | "quiz" | "progress" | "glossary" | "admin";
-type Role = "student" | "admin";
-
-type Tenant = {
-  id: string;
-  name: string;
-  plan: string;
-  domain: string;
-  members: number;
-};
+type View = "dashboard" | "roadmap" | "lesson" | "scenario" | "lab" | "quiz" | "progress" | "glossary" | "records";
 
 type UserAccount = {
   id: string;
   name: string;
-  email: string;
-  password: string;
-  role: Role;
-  tenantId: string;
+  email?: string;
+  createdAt?: string;
+  tenantId?: string;
 };
 
 type MentorProgress = {
@@ -89,7 +73,7 @@ type LessonAssessment = {
   evidenceNotes: string;
   artifactRefs: string[];
   reviewedAt?: string;
-  reviewer?: "self" | "mentor" | "admin";
+  reviewer?: "self" | "mentor" | "system";
 };
 
 type StageAssessment = {
@@ -125,13 +109,63 @@ const APP_RELEASE_TAG = "Release v2.3";
 
 type Store = {
   users: UserAccount[];
-  tenants: Tenant[];
   activeUserId: string | null;
-  activeTenantId: string | null;
-  progressByTenant: Record<string, ProgressState>;
+  progressByUser: Record<string, ProgressState>;
 };
 
 const storageKey = "aws-lab-platform-store-v2";
+const uiStateKey = "aws-lab-platform-ui-state-v1";
+const restorableViews: View[] = ["dashboard", "roadmap", "lesson", "scenario", "lab", "quiz", "progress", "glossary", "records"];
+
+type UiState = {
+  view: View;
+  selectedDay: number;
+};
+
+const normalizeDay = (day: unknown) => {
+  const parsedDay = Number(day);
+  if (!Number.isFinite(parsedDay)) return 1;
+  return Math.min(30, Math.max(1, Math.round(parsedDay)));
+};
+
+const isRestorableView = (view: unknown): view is View => (
+  typeof view === "string" && restorableViews.includes(view as View)
+);
+
+const parseHashUiState = (): Partial<UiState> => {
+  const hash = window.location.hash.replace(/^#/, "");
+  const lessonMatch = hash.match(/^\/lesson\/(\d+)$/);
+  if (lessonMatch) {
+    return { view: "lesson", selectedDay: normalizeDay(lessonMatch[1]) };
+  }
+
+  const viewMatch = hash.match(/^\/([a-z-]+)$/);
+  if (viewMatch?.[1] === "admin") {
+    return { view: "records" };
+  }
+  if (viewMatch && isRestorableView(viewMatch[1])) {
+    return { view: viewMatch[1] };
+  }
+
+  return {};
+};
+
+const loadUiState = (): UiState => {
+  const hashState = parseHashUiState();
+  const raw = localStorage.getItem(uiStateKey);
+  const storedState = raw ? JSON.parse(raw) as { view?: string; selectedDay?: unknown } : {};
+  const legacyStoredView = storedState.view === "admin" ? "records" : storedState.view;
+  const storedView = isRestorableView(legacyStoredView) ? legacyStoredView : "dashboard";
+  return {
+    view: hashState.view ?? storedView,
+    selectedDay: normalizeDay(hashState.selectedDay ?? storedState.selectedDay ?? 1)
+  };
+};
+
+const getUiHash = (view: View, selectedDay: number) => {
+  if (view === "lesson") return `#/lesson/${normalizeDay(selectedDay)}`;
+  return `#/${view}`;
+};
 
 const createEmptyMentorProgress = (): MentorProgress => ({
   stepByLesson: {},
@@ -150,27 +184,28 @@ const createEmptyProgress = (): ProgressState => ({
   stageAssessments: {}
 });
 
-const seededProgress: ProgressState = {
-  completedDays: [1, 2, 3, 4, 5, 6, 7],
-  quizScores: [80, 90, 76],
-  currentDay: 8,
-  onboardingDone: ["repo-audit", "local-run"],
-  mentor: createEmptyMentorProgress(),
-  assessmentsByDay: {},
-  stageAssessments: {}
+const emptyProgress = createEmptyProgress();
+const createLocalProfile = (name: string): UserAccount => ({
+  id: `profile-${Date.now()}`,
+  name: name.trim(),
+  createdAt: new Date().toISOString()
+});
+
+const normalizeUserAccount = (user: Partial<UserAccount> & Record<string, unknown>): UserAccount => {
+  const fallbackName = user.email === "admin@example.com" ? "AWS Demo Profile" : "Local Learner";
+  return {
+    id: user.id ?? `profile-${Date.now()}`,
+    name: user.email === "admin@example.com" && /^admin/i.test(user.name ?? "") ? "AWS Demo Profile" : (user.name?.trim() || fallbackName),
+    email: user.email,
+    createdAt: user.createdAt,
+    tenantId: user.tenantId
+  };
 };
 
-const emptyProgress = createEmptyProgress();
-
 const createInitialStore = (): Store => ({
-  users: seedUsers as UserAccount[],
-  tenants: seedTenants,
+  users: [],
   activeUserId: null,
-  activeTenantId: null,
-  progressByTenant: {
-    "tenant-ticketfactory": seededProgress,
-    "tenant-cerry-lab": createEmptyProgress()
-  }
+  progressByUser: {}
 });
 
 const normalizeMentorProgress = (mentor?: Partial<MentorProgress>): MentorProgress => ({
@@ -467,60 +502,119 @@ const loadStore = (): Store => {
   const raw = localStorage.getItem(storageKey);
   if (!raw) return createInitialStore();
 
-  const parsed = JSON.parse(raw) as Omit<Store, "progressByTenant"> & {
+  const parsed = JSON.parse(raw) as Partial<Store> & {
+    activeTenantId?: string | null;
     progressByTenant?: Record<string, StoredProgressState>;
+    progressByUser?: Record<string, StoredProgressState>;
   };
-  const progressByTenant = Object.fromEntries(
-    Object.entries(parsed.progressByTenant ?? {}).map(([tenantId, progress]) => [tenantId, normalizeProgress(progress)])
+  const users = ((parsed.users?.length ? parsed.users : []) as UserAccount[]).map(normalizeUserAccount);
+  const legacyProgressByTenant = parsed.progressByTenant ?? {};
+  const normalizedProgressByUser = Object.fromEntries(
+    Object.entries(parsed.progressByUser ?? {}).map(([userId, progress]) => [userId, normalizeProgress(progress)])
   );
+  const fallbackLegacyProgress = Object.values(legacyProgressByTenant)[0];
+  if (!users.length && fallbackLegacyProgress) {
+    users.push({ id: "profile-migrated", name: "Local Learner", createdAt: new Date().toISOString() });
+  }
+  users.forEach((user) => {
+    if (normalizedProgressByUser[user.id]) return;
+    const legacyTenantProgress = user.tenantId ? legacyProgressByTenant[user.tenantId] : undefined;
+    const activeTenantProgress = parsed.activeTenantId ? legacyProgressByTenant[parsed.activeTenantId] : undefined;
+    normalizedProgressByUser[user.id] = normalizeProgress(legacyTenantProgress ?? activeTenantProgress ?? fallbackLegacyProgress);
+  });
+  const activeUserId = users.some((user) => user.id === parsed.activeUserId)
+    ? parsed.activeUserId ?? null
+    : users[0]?.id ?? null;
+  const activeUsers = activeUserId ? users.filter((user) => user.id === activeUserId) : [];
 
   return {
-    ...parsed,
-    progressByTenant
+    users: activeUsers,
+    activeUserId,
+    progressByUser: activeUserId
+      ? { [activeUserId]: normalizedProgressByUser[activeUserId] ?? createEmptyProgress() }
+      : {}
   };
 };
 
 function App() {
   const [store, setStore] = useState<Store>(loadStore);
-  const [view, setView] = useState<View>(store.activeUserId ? "dashboard" : "auth");
-  const [selectedDay, setSelectedDay] = useState(1);
+  const [initialUiState] = useState<UiState>(loadUiState);
+  const [view, setView] = useState<View>(initialUiState.view);
+  const [selectedDay, setSelectedDay] = useState(initialUiState.selectedDay);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
   const [quizResult, setQuizResult] = useState<number | null>(null);
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(store));
+    if (store.activeUserId || store.users.length) {
+      localStorage.setItem(storageKey, JSON.stringify(store));
+    } else {
+      localStorage.removeItem(storageKey);
+    }
   }, [store]);
 
   const activeUser = store.users.find((user) => user.id === store.activeUserId) ?? null;
-  const activeTenant = store.tenants.find((tenant) => tenant.id === store.activeTenantId) ?? null;
-  const progress = activeTenant ? store.progressByTenant[activeTenant.id] ?? emptyProgress : emptyProgress;
+  const progress = activeUser ? store.progressByUser[activeUser.id] ?? emptyProgress : emptyProgress;
   const lesson = allLessons.find((item) => item.day === selectedDay) ?? allLessons[0];
   const completion = Math.round((progress.completedDays.length / 30) * 100);
   const avgScore = progress.quizScores.length
     ? Math.round(progress.quizScores.reduce((sum, score) => sum + score, 0) / progress.quizScores.length)
     : 0;
 
-  const updateTenantProgress = (nextProgress: ProgressState) => {
-    if (!activeTenant) return;
+  useEffect(() => {
+    if (!activeUser) {
+      localStorage.removeItem(uiStateKey);
+      if (window.location.hash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      }
+      return;
+    }
+
+    const nextUiState: UiState = { view, selectedDay };
+    localStorage.setItem(uiStateKey, JSON.stringify(nextUiState));
+    const nextHash = getUiHash(view, selectedDay);
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
+    }
+  }, [activeUser, selectedDay, view]);
+
+  useEffect(() => {
+    if (!activeUser) return;
+
+    const syncUiStateFromHash = () => {
+      const hashState = parseHashUiState();
+      if (hashState.selectedDay) {
+        setSelectedDay(hashState.selectedDay);
+      }
+      if (hashState.view) {
+        setView(hashState.view);
+      }
+    };
+
+    window.addEventListener("hashchange", syncUiStateFromHash);
+    return () => window.removeEventListener("hashchange", syncUiStateFromHash);
+  }, [activeUser]);
+
+  const updateUserProgress = (nextProgress: ProgressState) => {
+    if (!activeUser) return;
     setStore((prev) => ({
       ...prev,
-      progressByTenant: {
-        ...prev.progressByTenant,
-        [activeTenant.id]: nextProgress
+      progressByUser: {
+        ...prev.progressByUser,
+        [activeUser.id]: nextProgress
       }
     }));
   };
 
   const updateMentorProgress = (mentorUpdate: MentorProgressUpdate) => {
-    if (!activeTenant) return;
+    if (!activeUser) return;
     setStore((prev) => {
-      const currentProgress = prev.progressByTenant[activeTenant.id] ?? createEmptyProgress();
+      const currentProgress = prev.progressByUser[activeUser.id] ?? createEmptyProgress();
       const nextMentor = typeof mentorUpdate === "function" ? mentorUpdate(currentProgress.mentor) : mentorUpdate;
       return {
         ...prev,
-        progressByTenant: {
-          ...prev.progressByTenant,
-          [activeTenant.id]: {
+        progressByUser: {
+          ...prev.progressByUser,
+          [activeUser.id]: {
             ...currentProgress,
             mentor: nextMentor
           }
@@ -538,7 +632,7 @@ function App() {
     const completedDays = progress.completedDays.includes(selectedDay)
       ? progress.completedDays
       : [...progress.completedDays, selectedDay].sort((a, b) => a - b);
-    updateTenantProgress({
+    updateUserProgress({
       ...progress,
       completedDays,
       currentDay: Math.min(30, Math.max(progress.currentDay, selectedDay + 1))
@@ -549,7 +643,7 @@ function App() {
     const onboardingDone = progress.onboardingDone.includes(id)
       ? progress.onboardingDone.filter((item) => item !== id)
       : [...progress.onboardingDone, id];
-    updateTenantProgress({ ...progress, onboardingDone });
+    updateUserProgress({ ...progress, onboardingDone });
   };
 
   const submitQuiz = (questionIds?: string[]) => {
@@ -559,61 +653,40 @@ function App() {
     const correct = scopedQuestions.filter((question) => quizAnswers[question.id] === question.answer).length;
     const score = scopedQuestions.length ? Math.round((correct / scopedQuestions.length) * 100) : 0;
     setQuizResult(score);
-    updateTenantProgress({ ...progress, quizScores: [...progress.quizScores, score] });
+    updateUserProgress({ ...progress, quizScores: [...progress.quizScores, score] });
   };
 
-  const signIn = (email: string, password: string) => {
-    const user = store.users.find((item) => item.email === email && item.password === password);
-    if (!user) return "帳號或密碼錯誤 / Invalid email or password";
-    setStore((prev) => ({ ...prev, activeUserId: user.id, activeTenantId: user.tenantId }));
-    setSelectedDay((store.progressByTenant[user.tenantId] ?? emptyProgress).currentDay);
-    setView("dashboard");
-    return "";
-  };
-
-  const register = (payload: { name: string; email: string; password: string; tenantName: string }) => {
-    if (store.users.some((user) => user.email === payload.email)) return "Email 已被註冊 / Email already exists";
-    const tenantId = `tenant-${Date.now()}`;
-    const userId = `user-${Date.now()}`;
-    const newTenant: Tenant = {
-      id: tenantId,
-      name: payload.tenantName,
-      plan: "Trial",
-      domain: `${payload.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.local`,
-      members: 1
-    };
-    const newUser: UserAccount = {
-      id: userId,
-      name: payload.name,
-      email: payload.email,
-      password: payload.password,
-      role: "admin",
-      tenantId
-    };
+  const startLocalProfile = (name: string) => {
+    const nextUser = createLocalProfile(name);
     setStore((prev) => ({
-      users: [...prev.users, newUser],
-      tenants: [...prev.tenants, newTenant],
-      activeUserId: userId,
-      activeTenantId: tenantId,
-      progressByTenant: { ...prev.progressByTenant, [tenantId]: createEmptyProgress() }
+      users: [nextUser],
+      activeUserId: nextUser.id,
+      progressByUser: { [nextUser.id]: createEmptyProgress() }
     }));
     setSelectedDay(1);
     setView("dashboard");
-    return "";
   };
 
-  const signOut = () => {
-    setStore((prev) => ({ ...prev, activeUserId: null, activeTenantId: null }));
-    setView("auth");
+  const updateProfileName = (name: string) => {
+    if (!activeUser) return;
+    const nextName = name.trim();
+    if (!nextName) return;
+    setStore((prev) => ({
+      ...prev,
+      users: prev.users.map((user) => user.id === activeUser.id ? { ...user, name: nextName } : user)
+    }));
   };
 
-  const switchTenant = (tenantId: string) => {
-    setStore((prev) => ({ ...prev, activeTenantId: tenantId }));
-    setSelectedDay((store.progressByTenant[tenantId] ?? emptyProgress).currentDay);
+  const resetLocalProfile = () => {
+    localStorage.removeItem(storageKey);
+    localStorage.removeItem(uiStateKey);
+    setStore(createInitialStore());
+    setSelectedDay(1);
+    setView("dashboard");
   };
 
-  if (!activeUser || !activeTenant || view === "auth") {
-    return <AuthShell signIn={signIn} register={register} />;
+  if (!activeUser) {
+    return <ProfileSetup onStart={startLocalProfile} />;
   }
 
   const navItems = [
@@ -624,7 +697,7 @@ function App() {
     ["quiz", ClipboardCheck, "測驗模式", "Quiz Mode"],
     ["progress", Gauge, "學習歷程", "Learning Progress"],
     ["glossary", BookOpen, "名詞表", "Glossary"],
-    ["admin", UserRoundCog, "後台管理", "Admin"]
+    ["records", UserRoundCog, "本機紀錄", "Local Records"]
   ] as const;
   const activeNavView = view === "lesson" ? "roadmap" : view;
 
@@ -639,27 +712,16 @@ function App() {
             </div>
             <span className="app-release-tag">{APP_RELEASE_TAG}</span>
           </div>
-        <div className="mobile-shell-actions" aria-label="Mobile tenant and account controls">
-          <label className="mobile-tenant-select">
-            <span>租戶</span>
-            <select value={activeTenant.id} onChange={(event) => switchTenant(event.target.value)}>
-              {store.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
-            </select>
-          </label>
+        <div className="mobile-shell-actions account-only" aria-label="Mobile account controls">
           <div className="mobile-account-chip">
             <span className="mobile-avatar">{activeUser.name.slice(0, 2).toUpperCase()}</span>
             <strong>{activeUser.name}</strong>
-            <button type="button" onClick={signOut} aria-label="Logout">
-              <LogOut size={15} />
-            </button>
           </div>
         </div>
-        <div className="tenant-switcher">
-          <label>Tenant / 租戶</label>
-          <select value={activeTenant.id} onChange={(event) => switchTenant(event.target.value)}>
-            {store.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
-          </select>
-          <small>{activeTenant.plan} plan · {activeTenant.domain}</small>
+        <div className="local-record-card">
+          <span>Local record</span>
+          <strong>{activeUser.name}</strong>
+          <small>Progress saved in this browser</small>
         </div>
         <nav className="app-nav" aria-label="Primary navigation">
           {navItems.map(([id, Icon, zh, en]) => (
@@ -675,67 +737,62 @@ function App() {
         <header className="topbar">
           <div>
             <h1>AWS Docker Compose 30-Day Lab</h1>
-            <p>{activeTenant.name} · 從 Docker Compose 到 AWS Production Deployment</p>
+            <p>{activeUser.name} · 使用 localStorage 保存學習歷程</p>
           </div>
           <div className="top-actions">
             <div className="user-chip">{activeUser.name.slice(0, 2).toUpperCase()}<span>{activeUser.name}</span></div>
-            <button className="secondary" onClick={signOut}><LogOut size={16} /> 登出 / Logout</button>
           </div>
         </header>
 
         {view === "dashboard" && <Dashboard completion={completion} avgScore={avgScore} progress={progress} openLesson={openLesson} toggleOnboarding={toggleOnboarding} />}
         {view === "roadmap" && <Roadmap progress={progress} openLesson={openLesson} />}
-        {view === "lesson" && <LessonView lesson={lesson} progress={progress} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
-        {view === "scenario" && <ScenarioBuilder tenant={activeTenant} />}
+        {view === "lesson" && <LessonView lesson={lesson} progress={progress} completed={progress.completedDays.includes(selectedDay)} markComplete={markComplete} setView={setView} openLesson={openLesson} mentorProgress={progress.mentor} updateMentorProgress={updateMentorProgress} />}
+        {view === "scenario" && <ScenarioBuilder user={activeUser} />}
         {view === "lab" && <InteractiveLab openLesson={openLesson} />}
-        {view === "quiz" && <QuizView answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} submitQuiz={submitQuiz} openLesson={openLesson} />}
-        {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} tenant={activeTenant} openLesson={openLesson} />}
+        {view === "quiz" && <QuizView currentDay={progress.currentDay} answers={quizAnswers} setAnswers={setQuizAnswers} result={quizResult} setQuizResult={setQuizResult} submitQuiz={submitQuiz} openLesson={openLesson} />}
+        {view === "progress" && <ProgressView completion={completion} avgScore={avgScore} progress={progress} user={activeUser} openLesson={openLesson} />}
         {view === "glossary" && <Glossary />}
-        {view === "admin" && <AdminDashboard store={store} activeTenant={activeTenant} onLogout={signOut} />}
+        {view === "records" && <LocalRecordsView store={store} activeUser={activeUser} progress={progress} updateProfileName={updateProfileName} resetLocalProfile={resetLocalProfile} />}
       </main>
     </div>
   );
 }
 
-function AuthShell({ signIn, register }: { signIn: (email: string, password: string) => string; register: (payload: { name: string; email: string; password: string; tenantName: string }) => string }) {
-  const [mode, setMode] = useState<"login" | "register">("register");
-  const [name, setName] = useState("Cerry Student");
-  const [tenantName, setTenantName] = useState("My AWS Lab");
-  const [email, setEmail] = useState("john@example.com");
-  const [password, setPassword] = useState("password123");
+function ProfileSetup({ onStart }: { onStart: (name: string) => void }) {
+  const [name, setName] = useState("Cerry Learner");
   const [message, setMessage] = useState("");
 
   const submit = () => {
-    const result = mode === "login" ? signIn(email, password) : register({ name, email, password, tenantName });
-    setMessage(result);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setMessage("請先輸入顯示名稱 / Please enter a display name");
+      return;
+    }
+    onStart(trimmedName);
   };
 
   return (
-    <section className="auth-shell">
-      <div className="auth-intro">
+    <section className="profile-setup-shell">
+      <div className="profile-setup-intro">
         <div className="brand-mark"><Cloud size={26} /></div>
         <h1>從 0 建立你的 AWS Docker Compose 學習環境</h1>
-        <p>Register a new member, create a tenant workspace, then follow guided steps from project audit to first AWS deployment.</p>
-        <div className="auth-steps">
+        <p>第一次使用只需要建立本機學習者。沒有註冊、沒有密碼、沒有後端，學習進度只保存在這台瀏覽器的 localStorage。</p>
+        <div className="profile-setup-steps">
           {zeroStartSteps.slice(0, 3).map((step) => <div key={step.id}><CheckCircle2 size={18} /><span>{step.title}</span></div>)}
         </div>
       </div>
-      <div className="auth-card">
-        <div className="auth-tabs">
-          <button className={mode === "register" ? "active-tab" : ""} onClick={() => setMode("register")}><UserPlus size={16} /> 註冊 / Register</button>
-          <button className={mode === "login" ? "active-tab" : ""} onClick={() => setMode("login")}><LogIn size={16} /> 登入 / Login</button>
+      <div className="profile-setup-card">
+        <div className="profile-setup-heading">
+          <UserRoundCog size={20} />
+          <div>
+            <strong>建立本機學習者 / Local Learner</strong>
+            <span>這個名稱只用來顯示在學習紀錄與頁首。</span>
+          </div>
         </div>
-        {mode === "register" && (
-          <>
-            <label>Name / 姓名<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <label>Tenant / 組織名稱<input value={tenantName} onChange={(event) => setTenantName(event.target.value)} /></label>
-          </>
-        )}
-        <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <label>Name / 顯示名稱<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         {message && <div className="error">{message}</div>}
-        <button className="primary wide" onClick={submit}>{mode === "register" ? "建立會員與租戶 / Create Account" : "登入 / Sign In"}</button>
-        <div className="notice">Demo login: john@example.com / password123 或 admin@example.com / password123</div>
+        <button className="primary wide" onClick={submit}>開始學習 / Start Learning</button>
+        <div className="notice">之後重新整理或回到本站時，系統會讀取 localStorage 並直接回到你的學習進度。</div>
       </div>
     </section>
   );
@@ -806,22 +863,6 @@ function Dashboard({ completion, avgScore, progress, openLesson, toggleOnboardin
         <div><BookOpen size={18} /><strong>Runbook</strong><span>第一次部署流程</span></div>
       </div>
 
-      <details className="zero-secondary" open>
-        <summary>補充資訊：完整 5 步文字說明</summary>
-        <div className="zero-grid compact">
-          {zeroStartSteps.map((step) => {
-            const done = progress.onboardingDone.includes(step.id);
-            return (
-              <button key={step.id} className={`zero-step ${done ? "done" : ""}`} onClick={() => toggleOnboarding(step.id)}>
-                <CheckCircle2 size={20} />
-                <strong>{step.title}</strong>
-                <span>{step.body}</span>
-                <small>Output: {step.output}</small>
-              </button>
-            );
-          })}
-        </div>
-      </details>
     </section>
   );
 }
@@ -928,12 +969,53 @@ function Roadmap({ progress, openLesson }: { progress: ProgressState; openLesson
   );
 }
 
+type CompletionReviewCardId = "artifact" | "acceptance" | "pitfalls" | "readiness" | "finish";
+
+const completionReviewCards: Array<{
+  id: CompletionReviewCardId;
+  step: string;
+  label: string;
+  purpose: string;
+}> = [
+  {
+    id: "artifact",
+    step: "1",
+    label: "交付物",
+    purpose: "先確認今天做出的 artifact 能不能被保存與延續。"
+  },
+  {
+    id: "acceptance",
+    step: "2",
+    label: "驗收",
+    purpose: "再對照完成標準，確認不是只看完文字。"
+  },
+  {
+    id: "pitfalls",
+    step: "3",
+    label: "風險",
+    purpose: "補上踩雷點與 recovery note，避免明天重踩。"
+  },
+  {
+    id: "readiness",
+    step: "4",
+    label: "能力",
+    purpose: "最後估算今天能力落點與缺少的證據。"
+  },
+  {
+    id: "finish",
+    step: "5",
+    label: "完成",
+    purpose: "全部確認後再標記本日完成或前往下一天。"
+  }
+];
+
 function LessonView({
   lesson,
   progress,
   completed,
   markComplete,
   setView,
+  openLesson,
   mentorProgress,
   updateMentorProgress
 }: {
@@ -942,6 +1024,7 @@ function LessonView({
   completed: boolean;
   markComplete: () => void;
   setView: (view: View) => void;
+  openLesson: (day: number) => void;
   mentorProgress: MentorProgress;
   updateMentorProgress: (mentorUpdate: MentorProgressUpdate) => void;
 }) {
@@ -953,13 +1036,18 @@ function LessonView({
   const currentStep = steps[stepIndex] ?? steps[0];
   const completedStepIds = mentorProgress.completedStepsByLesson[lesson.day] ?? [];
   const currentStepCompleted = currentStep ? completedStepIds.includes(currentStep.id) : false;
+  const allStepsCompleted = steps.every((step) => completedStepIds.includes(step.id));
   const commandLines = lesson.command.split("\n").filter(Boolean);
   const readiness = estimateLessonReadiness(lesson, progress);
-  const [activeLessonTab, setActiveLessonTab] = useState<LessonTab>("lab");
+  const deliverableAnchorId = `lesson-deliverables-${lesson.day}`;
+  const activeStepAnchorId = `lesson-active-step-${lesson.day}`;
+  const flowAnchorId = `lesson-flow-${lesson.day}`;
+  const nextStep = stepIndex < maxStepIndex ? steps[stepIndex + 1] : null;
+  const [activeReviewCard, setActiveReviewCard] = useState<CompletionReviewCardId>("artifact");
 
   useEffect(() => {
-    setActiveLessonTab("lab");
-  }, [lesson.day]);
+    setActiveReviewCard("artifact");
+  }, [lesson.day, allStepsCompleted]);
 
   const setStepIndex = (nextIndex: number) => {
     const boundedStepIndex = Math.min(Math.max(nextIndex, 0), maxStepIndex);
@@ -970,6 +1058,17 @@ function LessonView({
         [lesson.day]: boundedStepIndex
       }
     }));
+  };
+
+  const scrollToFlow = () => {
+    window.setTimeout(() => {
+      const flowSection = document.getElementById(flowAnchorId);
+      flowSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
+
+  const selectStep = (nextIndex: number) => {
+    setStepIndex(nextIndex);
   };
 
   const toggleCurrentStepComplete = () => {
@@ -1009,8 +1108,34 @@ function LessonView({
     });
   };
 
+  const scrollToDeliverables = () => {
+    const deliverablesSection = document.getElementById(deliverableAnchorId);
+    deliverablesSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const advanceFromCurrentStep = () => {
+    if (stepIndex >= maxStepIndex) {
+      scrollToDeliverables();
+      return;
+    }
+
+    scrollToFlow();
+    selectStep(stepIndex + 1);
+  };
+
+  const goToNextDay = () => {
+    if (!completed) {
+      markComplete();
+    }
+    if (lesson.day < 30) {
+      openLesson(lesson.day + 1);
+      return;
+    }
+    setView("progress");
+  };
+
   return (
-    <section className="lesson-workspace">
+    <section className="lesson-workspace lesson-linear">
       <div className="lesson-main-flow">
         <SectionHeader title={`Day ${lesson.day}: ${lesson.title}`} desc={lesson.titleEn} />
         <div className="lesson-meta">
@@ -1019,139 +1144,168 @@ function LessonView({
           <span>{lesson.duration}</span>
         </div>
 
-        <LessonStepper steps={steps} activeIndex={stepIndex} completedStepIds={completedStepIds} setStepIndex={setStepIndex} />
-        <ArchitectureMappingDiagram lesson={lesson} />
-
-        <section className="lesson-tab-shell">
-          <div className="lesson-tab-list" role="tablist" aria-label="Lesson content sections">
-            {[
-              ["overview", "主線", "情境與目標"],
-              ["lab", "流程", "目前實作"],
-              ["deliverables", "交付驗收", "檢核與踩雷"],
-              ["references", "參考", "規格與來源"]
-            ].map(([id, label, desc]) => (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={activeLessonTab === id}
-                className={activeLessonTab === id ? "active" : ""}
-                onClick={() => setActiveLessonTab(id as LessonTab)}
-              >
-                <strong>{label}</strong>
-                <span>{desc}</span>
-              </button>
-            ))}
+        <Panel title="今日主線 / Today's Path">
+          <div className="lesson-story-grid">
+            <article className="lesson-story-card">
+              <span>情境</span>
+              <strong>{mentorScript.scenario}</strong>
+            </article>
+            <article className="lesson-story-card">
+              <span>今天目標</span>
+              <strong>{mentorScript.todayGoal}</strong>
+            </article>
+            <article className="lesson-story-card">
+              <span>下一步接續</span>
+              <strong>{mentorScript.nextContext}</strong>
+            </article>
           </div>
+          <div className="mentor-callout lesson-why-callout">{mentorScript.whyItMatters}</div>
+        </Panel>
 
-          <div className="lesson-tab-panel" role="tabpanel">
-            {activeLessonTab === "overview" && (
-              <div className="lesson-tab-content">
-                <Panel title="Day 主線 / Daily Logic">
-                  <div className="mission-brief-vertical">
-                    <p><strong>情境：</strong>{mentorScript.scenario}</p>
-                    <p><strong>今日目標：</strong>{mentorScript.todayGoal}</p>
-                    <p><strong>上一步接續：</strong>{mentorScript.previousContext}</p>
-                    <p><strong>下一步接續：</strong>{mentorScript.nextContext}</p>
-                  </div>
-                </Panel>
+        <ArchitectureMappingDiagram lesson={lesson} />
+        <Panel title="今日實作流程">
+          <div id={flowAnchorId} />
+          <p className="lesson-flow-intro">先看完整步驟，再進入目前這一步。每個步驟都對應一個明確用途，不是測驗題，也不是只看完就算完成。</p>
+          <LessonStepper steps={steps} activeIndex={stepIndex} completedStepIds={completedStepIds} setStepIndex={selectStep} />
+          <p className="lesson-step-hint">點上方任一步驟卡，下面只會顯示該步驟對應的工作區與操作內容。</p>
+        </Panel>
 
-                <Panel title="今日流程 / 5 分鐘邏輯流程">
-                  <details className="flow-accordion" open>
-                    <summary>展開每日流程（5 步）</summary>
-                    <ol className="numbered-list">
-                      {lesson.steps.map((item, index) => <li key={`${index}-${item}`}><strong>{index + 1}</strong><span>{item}</span></li>)}
-                    </ol>
-                  </details>
-                </Panel>
-              </div>
-            )}
+        {currentStep && (
+          <div id={activeStepAnchorId}>
+            <ActiveStepPanel
+            lesson={lesson}
+            step={currentStep}
+            stepIndex={stepIndex}
+            commandLines={commandLines}
+            completed={currentStepCompleted}
+            completeStep={toggleCurrentStepComplete}
+            advanceStep={advanceFromCurrentStep}
+            isLastStep={stepIndex >= maxStepIndex}
+            nextStep={nextStep}
+          />
+          </div>
+        )}
 
-            {activeLessonTab === "lab" && (
-              <div className="lesson-tab-content">
-                <TicketFactoryDecisionLab lesson={lesson} />
-                {currentStep && (
-                  <ActiveStepPanel
-                    lesson={lesson}
-                    step={currentStep}
-                    stepIndex={stepIndex}
-                    commandLines={commandLines}
-                    completed={currentStepCompleted}
-                    toggleComplete={toggleCurrentStepComplete}
-                    nextStep={() => setStepIndex(stepIndex + 1)}
-                    isLastStep={stepIndex >= maxStepIndex}
-                  />
-                )}
-                {lesson.day === 1 && (
-                  <details className="tab-accordion" open>
-                    <summary>Deployment Inventory / 部署盤點表</summary>
-                    <DeploymentInventoryTable />
-                  </details>
-                )}
-              </div>
-            )}
+        {currentStep && <StepContextWorkspace lesson={lesson} step={currentStep} />}
 
-            {activeLessonTab === "deliverables" && (
-              <div className="lesson-tab-content">
-                <ReadinessEstimate readiness={readiness} title="Readiness Estimate / 本日能力預估" />
+        <section id={deliverableAnchorId} className="lesson-deliverable-stack">
+          {allStepsCompleted ? (
+            <>
+              <Panel title="本日收尾整理 / Daily Wrap-up">
+                <p className="lesson-flow-intro">流程步驟完成後，再用下方卡片逐格整理。這裡不一次攤開全部資訊，避免你在手機上被交付、驗收、風險與能力回顧同時打斷。</p>
+                <div className="review-card-tabs" role="tablist" aria-label="Completion review cards">
+                  {completionReviewCards.map((card) => (
+                    <button
+                      key={card.id}
+                      className={activeReviewCard === card.id ? "active" : ""}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeReviewCard === card.id}
+                      onClick={() => setActiveReviewCard(card.id)}
+                    >
+                      <span>{card.step}</span>
+                      <strong>{card.label}</strong>
+                    </button>
+                  ))}
+                </div>
 
-                <Panel title="關鍵交付 / Deliverables & 檢核">
-                  <div className="lesson-support-grid">
-                    <div>
-                      <strong>本日交付物</strong>
-                      <Checklist items={mentorScript.deliverables} />
+                <div className="review-card-purpose">
+                  {completionReviewCards.find((card) => card.id === activeReviewCard)?.purpose}
+                </div>
+
+                <div className="review-card-panel" role="tabpanel">
+                  {activeReviewCard === "artifact" && (
+                    <div className="review-card-content">
+                      <h4>整理今日交付物</h4>
+                      <p>先把今天做出的東西收好。這一步不是評分，而是確認你有留下能被回看、驗證、延續到下一天的 artifact。</p>
+                      <div className="output-checklist output-checklist-main">
+                        {mentorScript.deliverables.map((item, index) => {
+                          const done = isOutputDone(item);
+                          return (
+                            <label key={`${item}-${index}`} className={`output-item ${done ? "done" : ""}`}>
+                              <input type="checkbox" checked={done} onChange={() => toggleOutput(item)} />
+                              <span>{item}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div>
-                      <strong>本日驗收條件</strong>
+                  )}
+
+                  {activeReviewCard === "acceptance" && (
+                    <div className="review-card-content">
+                      <h4>對照驗收條件</h4>
+                      <p>交付物整理完後，再檢查它是否真的符合今天的完成標準。這裡決定能不能標記本日完成。</p>
                       <Checklist items={lesson.acceptance} />
                     </div>
-                  </div>
-                </Panel>
+                  )}
 
-                <Panel title="共通陷阱 / Common Pitfalls">
-                  <div className="mentor-callout">{mentorScript.whyItMatters}</div>
-                  <ul className="detail-list">
-                    {mentorScript.guidedSteps.map((step) => <li key={step.id}><CheckCircle2 size={16} /> <span>{step.title}：{step.commonMistake}</span></li>)}
-                  </ul>
-                </Panel>
+                  {activeReviewCard === "pitfalls" && (
+                    <div className="review-card-content">
+                      <h4>回顧常見失誤與回復方式</h4>
+                      <p>最後回頭看每一步最容易犯的錯，補上偵測方式或 recovery note，避免明天帶著今天的盲點繼續走。</p>
+                      <div className="lesson-pitfall-list">
+                        {mentorScript.guidedSteps.map((step) => (
+                          <article key={step.id} className="lesson-pitfall-card">
+                            <strong>{step.title}</strong>
+                            <p>{step.commonMistake}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                {lesson.day === 30 && <CapstoneDefensePanel progress={progress} />}
+                  {activeReviewCard === "readiness" && (
+                    <div className="review-card-content">
+                      <h4>最後能力回顧</h4>
+                      <p>能力預估放在最後，是因為它應該根據你完成的交付、驗收與風險紀錄來判斷，而不是一開始就出現。</p>
+                      <ReadinessEstimateBody readiness={readiness} />
+                    </div>
+                  )}
 
-                <Panel title="Checkpoint / 完成檢查">
-                  <div className="checkline">
-                    {completed ? <CheckCircle2 /> : <ListChecks />}
-                    <span>{completed ? "已完成 / Completed" : "完成本日 lab 後更新學習歷程 / Mark today complete"}</span>
-                    <button className="primary" onClick={markComplete}>標記完成 / Mark Complete</button>
-                    <button className="secondary" onClick={() => setView("quiz")}>開啟測驗 / Quiz</button>
-                  </div>
-                </Panel>
-              </div>
-            )}
+                  {activeReviewCard === "finish" && (
+                    <div className="review-card-content">
+                      <h4>完成這一天</h4>
+                      <div className="checkline">
+                        {completed ? <CheckCircle2 /> : <ListChecks />}
+                        <span>{completed ? "這一天已標記完成，現在可以前往下一天或改做測驗。" : "交付、驗收、風險與能力回顧都看完後，再標記這一天完成。"}</span>
+                      </div>
+                      <div className="active-step-actions">
+                        {completed ? (
+                          <>
+                            <button className="primary" onClick={goToNextDay}>{lesson.day < 30 ? `前往 Day ${lesson.day + 1}` : "前往學習歷程"}</button>
+                            <button className="secondary" onClick={() => setView("quiz")}>開啟測驗 / Quiz</button>
+                          </>
+                        ) : (
+                          <button className="primary" onClick={markComplete}>標記 Day 完成</button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Panel>
 
-            {activeLessonTab === "references" && (
-              <div className="lesson-tab-content">
+              {lesson.day === 30 && <CapstoneDefensePanel progress={progress} />}
+
+              <details className="tab-accordion">
+                <summary>需要查證時再看：參考資料</summary>
                 <div className="lesson-support-grid">
                   <Panel title="Current AWS References / 當前 AWS 版本與來源提醒"><Checklist items={lesson.sourceNotes} /></Panel>
                   <Panel title="Exam Mapping / AWS 認證能力對照"><Checklist items={lesson.examMapping} /></Panel>
                   <Panel title="Project Spec Checklist / 專案規格核對"><Checklist items={lesson.documentSpec} /></Panel>
                 </div>
+              </details>
+            </>
+          ) : (
+            <Panel title="完成上方流程後才展開">
+              <div className="checkline">
+                <ListChecks />
+                <span>先完成上方流程卡的步驟，這裡才會展開交付、自我檢查、完成按鈕與參考資料。</span>
               </div>
-            )}
-          </div>
+            </Panel>
+          )}
         </section>
       </div>
-
-      <RightHintRail
-        lesson={lesson}
-        stepIndex={stepIndex}
-        currentStep={currentStep}
-        completed={currentStepCompleted}
-        setStepIndex={setStepIndex}
-        toggleComplete={toggleCurrentStepComplete}
-        outputItems={mentorScript.deliverables}
-        outputProgress={outputProgress}
-        isOutputDone={isOutputDone}
-        toggleOutput={toggleOutput}
-      />
     </section>
   );
 }
@@ -1171,12 +1325,22 @@ function LessonStepper({
 
   return (
     <div className="lesson-stepper" aria-label="Lesson steps">
-      {steps.map((step, index) => (
-        <button key={step.id} className={`${index === activeIndex ? "active" : ""} ${completedStepIds.includes(step.id) ? "done" : ""}`} onClick={() => setStepIndex(index)}>
-          <span>{index + 1}</span>
-          <strong>{stepLabels[index] ?? step.title}</strong>
+      {steps.map((step, index) => {
+        const isActive = index === activeIndex;
+        const isDone = completedStepIds.includes(step.id);
+        const statusLabel = isActive ? "目前查看" : isDone ? "已完成" : index === activeIndex + 1 ? "下一步" : "步驟";
+
+        return (
+          <button key={step.id} className={`${isActive ? "active" : ""} ${isDone ? "done" : ""}`} onClick={() => setStepIndex(index)}>
+            <span>{index + 1}</span>
+          <div>
+            <strong>{stepLabels[index] ?? step.title}</strong>
+            <small>{step.expectedResult}</small>
+            <em>{statusLabel}</em>
+          </div>
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -2656,70 +2820,45 @@ function DeploymentInventoryTable() {
     }
   ];
   const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(inventoryItems.map((item) => [item.id, item.recommended])));
-  const selectedCount = inventoryItems.filter((item) => answers[item.id]).length;
-  const recommendedCount = inventoryItems.filter((item) => answers[item.id] === item.recommended).length;
+  const [statuses, setStatuses] = useState<Record<string, string>>(() => Object.fromEntries(inventoryItems.map((item) => [item.id, "pending"])));
+  const confirmedCount = inventoryItems.filter((item) => statuses[item.id] === "done").length;
 
   return (
     <Panel title="Deployment Inventory / 部署盤點表">
-      <div className="inventory-wizard">
-        <div className="inventory-wizard-head">
-          <div>
-            <strong>TicketFactory preset 互動盤點</strong>
-            <p>手機沒有作業環境時，先用已知 TicketFactory 設定練習判斷。你選的答案會同步成下方 artifact 表格。</p>
-          </div>
-          <span>{recommendedCount}/{inventoryItems.length} 建議對位</span>
+      <div className="inventory-wizard-head">
+        <div>
+          <strong>這是 Day 1 的 artifact 工作表，不是問答測驗</strong>
+          <p>先用 TicketFactory 的已知結構填出第一版對位。回到電腦後再依自己的 compose、env、volume 與 port 實際修正。</p>
         </div>
-
-        <div className="inventory-choice-grid">
-          {inventoryItems.map((item, index) => {
-            const selected = answers[item.id];
-            const matched = selected === item.recommended;
-            return (
-              <article className={`inventory-choice-card ${matched ? "matched" : "review"}`} key={item.id}>
-                <div className="inventory-choice-top">
-                  <span>{index + 1}</span>
-                  <div>
-                    <strong>{item.component}</strong>
-                    <small>{item.source}</small>
-                  </div>
-                </div>
-                <p>{item.check}</p>
-                <div className="inventory-option-list" role="group" aria-label={`${item.component} AWS mapping options`}>
-                  {item.options.map((option) => (
-                    <button
-                      type="button"
-                      key={option}
-                      className={selected === option ? "active" : ""}
-                      onClick={() => setAnswers((current) => ({ ...current, [item.id]: option }))}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-                <div className={`inventory-feedback ${matched ? "ok" : "warn"}`}>
-                  <strong>{matched ? "建議對位" : "需要再確認"}</strong>
-                  <span>{matched ? item.feedback : `你選了 ${selected}，建議回頭比較它是否真的解決 ${item.check}。`}</span>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        <span>{confirmedCount}/{inventoryItems.length} 已確認</span>
       </div>
 
       <div className="inventory-table-wrap">
         <table className="inventory-table">
           <thead>
-            <tr><th>Local component</th><th>要檢查什麼</th><th>AWS 方向</th><th>狀態</th></tr>
+            <tr><th>Local component</th><th>來源與檢查點</th><th>建議 AWS 方向</th><th>你的決策</th><th>狀態</th></tr>
           </thead>
           <tbody>
             {inventoryItems.map((row, index) => (
               <tr key={row.id}>
                 <td data-label="Local component"><strong>{row.component}</strong><small>#{index + 1} · {row.source}</small></td>
-                <td data-label="要檢查什麼"><label><input type="checkbox" checked={Boolean(answers[row.id])} readOnly /> {row.check}</label></td>
-                <td data-label="AWS 方向">{answers[row.id]}</td>
-                <td data-label="狀態"><select value={answers[row.id] === row.recommended ? "done" : "pending"} onChange={(event) => {
-                  if (event.target.value === "done") setAnswers((current) => ({ ...current, [row.id]: row.recommended }));
-                }}><option value="pending">待確認</option><option value="done">已確認</option></select></td>
+                <td data-label="來源與檢查點">
+                  <strong>{row.check}</strong>
+                  <small>{row.feedback}</small>
+                </td>
+                <td data-label="建議 AWS 方向">{row.recommended}</td>
+                <td data-label="你的決策">
+                  <select value={answers[row.id]} onChange={(event) => setAnswers((current) => ({ ...current, [row.id]: event.target.value }))}>
+                    {row.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                </td>
+                <td data-label="狀態">
+                  <select value={statuses[row.id]} onChange={(event) => setStatuses((current) => ({ ...current, [row.id]: event.target.value }))}>
+                    <option value="pending">待確認</option>
+                    <option value="done">已確認</option>
+                    <option value="risk">有風險</option>
+                  </select>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -2727,7 +2866,95 @@ function DeploymentInventoryTable() {
       </div>
       <div className="inventory-wizard-summary">
         <CheckCircle2 size={16} />
-        <span>已完成 {selectedCount}/{inventoryItems.length} 個 TicketFactory component 對位；建議對位 {recommendedCount}/{inventoryItems.length}。</span>
+        <span>先完成每個 component 的第一版 AWS 對位，再帶著這張表進入 Day 2 的 production-like 驗證。</span>
+      </div>
+    </Panel>
+  );
+}
+
+function StepContextWorkspace({
+  lesson,
+  step
+}: {
+  lesson: Lesson;
+  step: Lesson["mentorScript"]["guidedSteps"][number];
+}) {
+  if (lesson.day === 1) {
+    const dayOneWorkspace: Record<string, { title: string; note: string; items?: string[]; showInventory?: boolean }> = {
+      services: {
+        title: "目前工作區 / Service Inventory Draft",
+        note: "先把你專案中的服務切成幾個角色，不急著上 AWS。這一步只做責任分類。",
+        items: [
+          "frontend / client：誰負責輸出畫面",
+          "api / web：誰負責 Laravel runtime",
+          "database：哪裡存交易資料",
+          "redis / queue：哪裡放快取、session、佇列",
+          "worker / scheduler：是否有背景任務"
+        ]
+      },
+      ports: {
+        title: "目前工作區 / Port Boundary Draft",
+        note: "這一步只看流量入口，不要同時處理資料庫遷移或 image。先分清楚誰能對外、誰只能內部使用。",
+        items: [
+          "哪些 port 要給瀏覽器或 ALB 進來",
+          "哪些 port 只應留在內部 network",
+          "database / redis 是否不應對公網開放",
+          "之後 Security Group 會怎麼收斂"
+        ]
+      },
+      volumes: {
+        title: "目前工作區 / Persistence Draft",
+        note: "這一步只看 container 重建後不能消失的資料，找出真正的 stateful 資源。",
+        items: [
+          "database data 目錄",
+          "uploads / storage / public disk",
+          "logs 是否需要保留",
+          "cache / session 是否可重建"
+        ]
+      },
+      env: {
+        title: "目前工作區 / Secret Classification",
+        note: "這一步只做設定值分類，先分 secret 和 non-secret，不急著選 AWS 服務。",
+        items: [
+          "APP_KEY / DB_PASSWORD / API token 屬於 secret",
+          "APP_URL / API_URL / public base path 屬於 config",
+          "哪些值未來會進 Secrets Manager",
+          "哪些值未來會進 SSM Parameter Store"
+        ]
+      },
+      mapping: {
+        title: "目前工作區 / AWS Mapping Artifact",
+        note: "現在才進入真正的部署盤點表，把前面四步的觀察填進 artifact。",
+        showInventory: true
+      }
+    };
+
+    const workspace = dayOneWorkspace[step.id];
+    if (workspace?.showInventory) {
+      return <DeploymentInventoryTable />;
+    }
+    if (workspace) {
+      return (
+        <Panel title={workspace.title}>
+          <p className="lesson-flow-intro">{workspace.note}</p>
+          {workspace.items ? <Checklist items={workspace.items} /> : null}
+        </Panel>
+      );
+    }
+  }
+
+  return (
+    <Panel title="這一步的產出">
+      <p className="lesson-flow-intro">這裡只顯示目前步驟要補上的 artifact 或檢查點，不把後續交付與完成檢查提前攤開。</p>
+      <div className="lesson-support-grid">
+        <div>
+          <strong>這一步要產出什麼</strong>
+          <div className="expected-output">{step.expectedResult}</div>
+        </div>
+        <div>
+          <strong>這一步先檢查什麼</strong>
+          <Checklist items={[step.instruction, step.mentorQuestion]} />
+        </div>
       </div>
     </Panel>
   );
@@ -2739,32 +2966,54 @@ function ActiveStepPanel({
   stepIndex,
   commandLines,
   completed,
-  toggleComplete,
-  nextStep,
-  isLastStep
+  completeStep,
+  advanceStep,
+  isLastStep,
+  nextStep
 }: {
   lesson: Lesson;
   step: Lesson["mentorScript"]["guidedSteps"][number];
   stepIndex: number;
   commandLines: string[];
   completed: boolean;
-  toggleComplete: () => void;
-  nextStep: () => void;
+  completeStep: () => void;
+  advanceStep: () => void;
   isLastStep: boolean;
+  nextStep: Lesson["mentorScript"]["guidedSteps"][number] | null;
 }) {
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+  const activeQuestion = lesson.mentorScript.quickQuestions.find((question) => question.id === activeQuestionId) ?? null;
+
+  useEffect(() => {
+    setActiveQuestionId(null);
+  }, [lesson.day, step.id]);
+
   return (
-    <Panel title={`Step ${stepIndex + 1}: ${step.title}`}>
+    <Panel title={`目前這一步 / Step ${stepIndex + 1}: ${step.title}`}>
       <div className="active-step-panel">
-        <div>
+        <div className="active-step-hero">
           <strong>目標</strong>
           <p>{step.instruction}</p>
+          <div className="active-step-status">
+            <span>{completed ? "這一步已完成" : "這一步進行中"}</span>
+            <small>{completed ? "先看清楚下一步目的，再決定是否前往下一步" : "先完成這一步，完成後才會顯示下一步目的"}</small>
+          </div>
+        </div>
+        <div className="active-step-grid">
+          <div>
+            <strong>為什麼現在做這一步</strong>
+            <div className="expected-output">{step.expectedResult}</div>
+          </div>
+          <div>
+            <strong>Cloud Mentor 提醒</strong>
+            <div className="mentor-section mentor-inline-section">
+              <p>{step.commonMistake}</p>
+              <small>{step.mentorQuestion}</small>
+            </div>
+          </div>
         </div>
         <div>
-          <strong>預期輸出</strong>
-          <div className="expected-output">{step.expectedResult}</div>
-        </div>
-        <div>
-          <strong>指令</strong>
+          <strong>操作指令</strong>
           <pre><code>{lesson.command}</code></pre>
           {commandLines.length > 1 && <Checklist items={commandLines.map((command) => `Run: ${command}`)} />}
         </div>
@@ -2772,10 +3021,37 @@ function ActiveStepPanel({
           <strong>完成條件</strong>
           <Checklist items={["能說明這一步檢查到什麼", "把結果填回 Deployment Inventory", "記錄一個可能踩雷點"]} />
         </div>
-        <div className="active-step-actions">
-          <button className="primary" onClick={toggleComplete}>{completed ? "取消完成 Step" : "我已完成 Step"}</button>
-          <button className="secondary" onClick={nextStep} disabled={isLastStep}>確認後進入下一步</button>
+        <div className="mentor-quick-questions mentor-inline-questions">
+          <strong>卡住時先問自己</strong>
+          {lesson.mentorScript.quickQuestions.map((question) => (
+            <button
+              key={question.id}
+              className={activeQuestionId === question.id ? "active" : ""}
+              onClick={() => setActiveQuestionId(question.id)}
+            >
+              {question.question}
+            </button>
+          ))}
         </div>
+        {activeQuestion && (
+          <div className="mentor-answer">
+            <strong>Cloud Mentor 回答</strong>
+            <p>{activeQuestion.answer}</p>
+          </div>
+        )}
+        {!completed ? (
+          <div className="active-step-actions">
+            <button className="primary" onClick={completeStep}>完成這一步</button>
+          </div>
+        ) : (
+          <div className="step-next-preview">
+            <strong>{isLastStep ? "下一段會做什麼" : "下一步的目的"}</strong>
+            <p>{isLastStep ? "你已完成今天所有步驟。接下來會進入交付、自我檢查與完成確認。" : `${nextStep?.title}：${nextStep?.expectedResult ?? ""}`}</p>
+            <div className="active-step-actions">
+              <button className="primary" onClick={advanceStep}>{isLastStep ? "前往交付檢查" : `前往下一步：${nextStep?.title ?? "下一步"}`}</button>
+            </div>
+          </div>
+        )}
       </div>
     </Panel>
   );
@@ -2903,7 +3179,7 @@ function RightHintRail({
   );
 }
 
-function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
+function ScenarioBuilder({ user }: { user: UserAccount }) {
   const presets = [
     {
       id: "ticketfactory",
@@ -2964,7 +3240,7 @@ function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
 
   const recommendation = useMemo(() => {
     const entries = [
-      `tenant: ${tenant.name}`,
+      `learner: ${user.name}`,
       `target: ${target}`,
       `app: ${appShape}`,
       `data: ${dataShape}`,
@@ -2991,7 +3267,7 @@ function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
             ];
 
     return `${entries.join(" · ")}\n${route.join(" ")}`;
-  }, [appShape, dataShape, target, tenant.name, trafficShape]);
+  }, [appShape, dataShape, target, user.name, trafficShape]);
 
   const mappingRows = useMemo(() => {
     const rows = [
@@ -3170,7 +3446,7 @@ function ScenarioBuilder({ tenant }: { tenant: Tenant }) {
 
           <Panel title="3. 落地建議">
             <div className="recommendation scenario-recommendation">
-              <strong>{tenant.name}</strong>
+              <strong>{user.name}</strong>
               <p>{recommendation}</p>
             </div>
             <div className="scenario-score-card">
@@ -3235,10 +3511,10 @@ function InteractiveLab({ openLesson }: { openLesson: (day: number) => void }) {
         <span>4 回到對應 Day</span>
       </div>
       <div className="grid two uneven">
-        <Panel title="情境清單">
-          <details className="lab-scenario-collapse" open>
-            <summary>展開 / 收合情境清單</summary>
-            <div className="lab-panel-note">Debug Scenarios：左側先看情境標題，再用中文輔助理解這個故障在課程裡代表什麼。</div>
+        <Panel title="選擇故障情境">
+          <details className="lab-scenario-collapse">
+            <summary>展開情境清單 / Debug Scenarios</summary>
+            <div className="lab-panel-note">先選一個故障情境，再到右側閱讀症狀、證據與診斷選項。</div>
             <div className="lab-summary-strip">
               <span>{labs.filter((item) => item.stageKey === "deployment").length} Deployment</span>
               <span>{labs.filter((item) => item.stageKey === "advanced").length} Advanced</span>
@@ -3334,27 +3610,33 @@ function InteractiveLab({ openLesson }: { openLesson: (day: number) => void }) {
 }
 
 function QuizView({
+  currentDay,
   answers,
   setAnswers,
   result,
+  setQuizResult,
   submitQuiz,
   openLesson
 }: {
+  currentDay: number;
   answers: Record<string, string>;
   setAnswers: (answers: Record<string, string>) => void;
   result: number | null;
+  setQuizResult: (result: number | null) => void;
   submitQuiz: (questionIds?: string[]) => void;
   openLesson: (day: number) => void;
 }) {
   const [stageFilter, setStageFilter] = useState<"all" | StageKey>("deployment");
   const [skillFilter, setSkillFilter] = useState<"all" | SkillArea>("all");
-  const [mode, setMode] = useState<"daily" | "stage" | "all">("daily");
+  const [mode, setMode] = useState<"today" | "daily" | "stage" | "all">("today");
   const [showChinese, setShowChinese] = useState(false);
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const visibleQuestions = quizQuestions.filter((question) => {
-    const stageMatch = stageFilter === "all" || question.stageKey === stageFilter;
+    const stageMatch = mode === "today" || stageFilter === "all" || question.stageKey === stageFilter;
     const skillMatch = skillFilter === "all" || question.skillArea === skillFilter;
     const modeMatch =
       mode === "all" ||
+      (mode === "today" && question.day === currentDay) ||
       (mode === "daily" && typeof question.day === "number") ||
       (mode === "stage" && typeof question.day !== "number");
     return stageMatch && skillMatch && modeMatch;
@@ -3364,9 +3646,10 @@ function QuizView({
       Object.fromEntries(
         visibleQuestions.map((question) => [question.id, shuffleArray(question.options)])
       ) as Record<string, string[]>,
-    [mode, skillFilter, stageFilter]
+    [currentDay, mode, skillFilter, stageFilter]
   );
-  const wrongQuestions = result === null ? [] : visibleQuestions.filter((question) => answers[question.id] !== question.answer);
+  const activeQuestion = visibleQuestions[activeQuestionIndex] ?? visibleQuestions[0] ?? null;
+  const wrongQuestions = result === null || !activeQuestion ? [] : [activeQuestion].filter((question) => answers[question.id] !== question.answer);
   const weaknessRows = Object.entries(
     wrongQuestions.reduce<Record<string, number>>((acc, question) => {
       acc[question.skillArea] = (acc[question.skillArea] ?? 0) + 1;
@@ -3380,15 +3663,31 @@ function QuizView({
   };
   const skillAreas: SkillArea[] = ["Docker", "ECS", "Networking", "Data", "CI/CD", "Observability", "Security", "Cost/DR"];
 
+  useEffect(() => {
+    setActiveQuestionIndex(0);
+    setQuizResult(null);
+  }, [currentDay, mode, setQuizResult, skillFilter, stageFilter]);
+
+  const goToQuestion = (index: number) => {
+    setActiveQuestionIndex(Math.min(Math.max(index, 0), Math.max(visibleQuestions.length - 1, 0)));
+    setQuizResult(null);
+  };
+
+  const answerQuestion = (questionId: string, option: string) => {
+    setAnswers({ ...answers, [questionId]: option });
+    setQuizResult(null);
+  };
+
   return (
     <section className="stack">
-      <SectionHeader title="測驗模式 / Quiz Mode" desc={`${quizQuestions.length} 題情境式題庫：每日 quick check + stage exam，錯題會回到 lesson day。`} />
+      <SectionHeader title="測驗訓練 / Quiz Training" desc={`${quizQuestions.length} 題情境式題庫。預設先練目前 Day，再依錯題回到對應課程補強。`} />
       <Panel title="Quiz Filters / 題庫篩選">
         <div className="quiz-filter-grid">
           <div>
             <strong>Mode</strong>
             <div className="segmented">
               {[
+                ["today", `今日練習 Day ${currentDay}`],
                 ["daily", "每日題"],
                 ["stage", "階段考"],
                 ["all", "全部"]
@@ -3454,7 +3753,22 @@ function QuizView({
         </Panel>
       )}
 
-      {visibleQuestions.map((question: QuizQuestion) => {
+      <Panel title="目前題目 / Current Question">
+        <div className="quiz-focus-toolbar">
+          <div>
+            <strong>{visibleQuestions.length ? `第 ${activeQuestionIndex + 1} / ${visibleQuestions.length} 題` : "目前沒有符合條件的題目"}</strong>
+          <span>{mode === "today" ? "先練目前 Day 的題目，再依結果回課程補強。" : "篩選後每次只顯示一題，避免整頁變成題庫牆。"}</span>
+          </div>
+          <div className="quiz-nav-actions">
+            <button className="secondary" onClick={() => goToQuestion(activeQuestionIndex - 1)} disabled={activeQuestionIndex <= 0}>上一題</button>
+            <button className="secondary" onClick={() => goToQuestion(activeQuestionIndex + 1)} disabled={activeQuestionIndex >= visibleQuestions.length - 1}>下一題</button>
+          </div>
+        </div>
+        <div className="quiz-progress-bar"><span style={{ width: `${visibleQuestions.length ? ((activeQuestionIndex + 1) / visibleQuestions.length) * 100 : 0}%` }} /></div>
+      </Panel>
+
+      {activeQuestion ? (() => {
+        const question = activeQuestion as QuizQuestion;
         const answered = answers[question.id];
         const isWrong = result !== null && answered !== question.answer;
         return (
@@ -3468,7 +3782,7 @@ function QuizView({
           <div className="options">
             {(shuffledOptionsByQuestion[question.id] ?? question.options).map((option) => (
               <label key={option} className={`${answers[question.id] === option ? "option active-option" : "option"} ${result !== null && option === question.answer ? "correct-option" : ""} ${result !== null && answered === option && option !== question.answer ? "wrong-option" : ""}`}>
-                <input type="radio" name={question.id} checked={answers[question.id] === option} onChange={() => setAnswers({ ...answers, [question.id]: option })} />
+                <input type="radio" name={question.id} checked={answers[question.id] === option} onChange={() => answerQuestion(question.id, option)} />
                 <span className="option-copy">
                   <span className="option-en">{quizOptionEnglish(option)}</span>
                   {showChinese && <span className="option-zh">{option}</span>}
@@ -3479,6 +3793,12 @@ function QuizView({
           {result !== null && (
             <div className={isWrong ? "notice danger" : "notice success"}>
               {question.explanation}
+              <div className="quiz-after-actions">
+                <button className="primary" onClick={() => goToQuestion(activeQuestionIndex + 1)} disabled={activeQuestionIndex >= visibleQuestions.length - 1}>
+                  下一題
+                </button>
+                {question.day ? <button className="secondary" onClick={() => openLesson(question.day!)}>回 Day {question.day}</button> : null}
+              </div>
               {question.remediationLessonDays?.length ? (
                 <div className="remediation-links">
                   {question.remediationLessonDays.map((day) => {
@@ -3500,14 +3820,18 @@ function QuizView({
           )}
         </Panel>
         );
-      })}
-      <button className="primary wide" onClick={() => submitQuiz(visibleQuestions.map((question) => question.id))}>提交目前題組 / Submit Current Quiz</button>
+      })() : (
+        <Panel title="沒有符合條件的題目">
+          <p className="empty-state">請調整 Stage、Mode 或 Skill filter。</p>
+        </Panel>
+      )}
+      <button className="primary wide" disabled={!activeQuestion} onClick={() => activeQuestion && submitQuiz([activeQuestion.id])}>提交本題 / Submit Current Question</button>
       {result !== null && <div className="result">Score / 分數：{result}%</div>}
     </section>
   );
 }
 
-function ReadinessEstimate({ readiness, title }: { readiness: ReadinessScore; title: string }) {
+function ReadinessEstimateBody({ readiness }: { readiness: ReadinessScore }) {
   const rubricRows = [
     ["Concept", "理解部署問題", readiness.rubric.concept],
     ["Implementation", "產出實作 artifact", readiness.rubric.implementation],
@@ -3517,7 +3841,7 @@ function ReadinessEstimate({ readiness, title }: { readiness: ReadinessScore; ti
   ] as const;
 
   return (
-    <Panel title={title}>
+    <>
       <div className={`readiness-card ${readiness.level}`}>
         <div className="readiness-score">
           <strong>{readiness.score}</strong>
@@ -3548,6 +3872,14 @@ function ReadinessEstimate({ readiness, title }: { readiness: ReadinessScore; ti
           {readiness.gaps.map((gap) => <li key={gap}>{gap}</li>)}
         </ul>
       </div>
+    </>
+  );
+}
+
+function ReadinessEstimate({ readiness, title }: { readiness: ReadinessScore; title: string }) {
+  return (
+    <Panel title={title}>
+      <ReadinessEstimateBody readiness={readiness} />
     </Panel>
   );
 }
@@ -3695,90 +4027,164 @@ function ProgressView({
   completion,
   avgScore,
   progress,
-  tenant,
+  user,
   openLesson
 }: {
   completion: number;
   avgScore: number;
   progress: ProgressState;
-  tenant: Tenant;
+  user: UserAccount;
   openLesson: (day: number) => void;
 }) {
+  const [evidenceFilter, setEvidenceFilter] = useState<"all" | "completed" | "needs-work" | "current-stage">("current-stage");
   const stageReadiness = estimateStageReadiness(progress);
   const evidenceDays = buildDailyEvidenceHeatmap(progress);
   const skillRadar = buildSkillRadar(progress);
   const examMappings = buildExamMappingSummary(progress);
   const currentOverallLevel = levelForScore(Math.round(stageReadiness.reduce((sum, stage) => sum + stage.score, 0) / stageReadiness.length));
   const currentOverallMeta = assessmentLevelMeta[currentOverallLevel];
+  const currentStageKey: StageKey = progress.currentDay <= 5 ? "deployment" : progress.currentDay <= 15 ? "advanced" : "deep-dive";
+  const filteredEvidenceDays = evidenceDays.filter((day) => {
+    if (evidenceFilter === "completed") return progress.completedDays.includes(day.day);
+    if (evidenceFilter === "needs-work") return day.gaps.length > 0 || !day.verification;
+    if (evidenceFilter === "current-stage") return day.stageKey === currentStageKey;
+    return true;
+  });
+  const focusSkillRadar = [...skillRadar].sort((a, b) => a.score - b.score).slice(0, 3);
 
   return (
     <section className="stack">
-      <SectionHeader title="學習歷程 / Learning Progress" desc={`${tenant.name} tenant-scoped progress。切換租戶會看到不同進度。`} />
+      <SectionHeader title="學習歷程 / Learning Progress" desc={`${user.name} 的 localStorage learning progress。completed days、quiz scores、mentor steps 都保存在此瀏覽器。`} />
       <div className="metrics">
         <Metric title="Completed Days" value={`${progress.completedDays.length}/30`} sub={`${completion}% complete`} icon={<CalendarDays />} />
         <Metric title="Average Score" value={`${avgScore}%`} sub="Quiz accuracy" icon={<Target />} />
         <Metric title="Current Day" value={`Day ${progress.currentDay}`} sub="Next lesson" icon={<BookOpen />} />
         <Metric title="AWS Level" value={currentOverallMeta.labelEn} sub={currentOverallMeta.awsLevel} icon={<Gauge />} />
       </div>
-      <Panel title="Stage Assessment Summary / 階段能力評估">
+      <Panel title="階段能力總覽 / Stage Assessment">
         <div className="assessment-stage-grid">
           {stageReadiness.map((stage) => <StageAssessmentCard key={stage.key} stage={stage} />)}
         </div>
       </Panel>
-      <Panel title="Daily Evidence Heatmap / 每日證據熱區">
+      <Panel title="每日完成證據 / Daily Evidence">
+        <div className="progress-filter-row" role="tablist" aria-label="Evidence filter">
+          {[
+            ["current-stage", "目前階段"],
+            ["needs-work", "待補強"],
+            ["completed", "已完成"],
+            ["all", "全部"]
+          ].map(([value, label]) => (
+            <button key={value} className={evidenceFilter === value ? "active" : ""} onClick={() => setEvidenceFilter(value as typeof evidenceFilter)}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="heatmap-legend">
           <span><i /> Implementation</span>
           <span><i /> Verification</span>
           <span><i /> Troubleshooting</span>
           <small>點擊 day 回到課程補 artifact、驗證或排錯證據。</small>
         </div>
-        <EvidenceHeatmap days={evidenceDays} openLesson={openLesson} />
+        <EvidenceHeatmap days={filteredEvidenceDays} openLesson={openLesson} />
       </Panel>
-      <Panel title="Skill Radar / 能力雷達">
-        <SkillRadar dimensions={skillRadar} openLesson={openLesson} />
+      <Panel title="優先補強能力 / Skill Focus">
+        <p className="lesson-flow-intro">先只看最需要補強的 3 個能力。完整能力雷達收在下方，避免一進頁就變成報表牆。</p>
+        <SkillRadar dimensions={focusSkillRadar} openLesson={openLesson} />
+        <details className="tab-accordion">
+          <summary>查看完整能力雷達 / Full Skill Radar</summary>
+          <SkillRadar dimensions={skillRadar} openLesson={openLesson} />
+        </details>
       </Panel>
-      <Panel title="Exam Mapping / 認證能力對照">
-        <ExamMappingDashboard mappings={examMappings} openLesson={openLesson} />
-      </Panel>
+      <details className="tab-accordion">
+        <summary>認證能力對照 / Exam Mapping</summary>
+        <Panel title="AWS 認證能力對照">
+          <ExamMappingDashboard mappings={examMappings} openLesson={openLesson} />
+        </Panel>
+      </details>
       <CapstoneDefensePanel progress={progress} />
-      <Panel title="Tenant Progress Isolation / 多租戶進度隔離">
-        <p>目前進度屬於 <strong>{tenant.name}</strong>。不同 tenant 有不同 completed days、quiz scores、onboarding steps。</p>
-      </Panel>
+      <details className="tab-accordion">
+        <summary>本機紀錄保存方式 / LocalStorage Record</summary>
+        <Panel title="localStorage 學習紀錄">
+          <p>目前進度屬於 <strong>{user.name}</strong>。資料保存在這台裝置的瀏覽器 localStorage，適合單人學習；清除瀏覽器資料或換裝置時需要重新建立紀錄。</p>
+        </Panel>
+      </details>
     </section>
   );
 }
 
-function AdminDashboard({ store, activeTenant, onLogout }: { store: Store; activeTenant: Tenant; onLogout: () => void }) {
-  const tenantUsers = store.users.filter((user) => user.tenantId === activeTenant.id);
+function LocalRecordsView({
+  store,
+  activeUser,
+  progress,
+  updateProfileName,
+  resetLocalProfile
+}: {
+  store: Store;
+  activeUser: UserAccount;
+  progress: ProgressState;
+  updateProfileName: (name: string) => void;
+  resetLocalProfile: () => void;
+}) {
+  const [draftName, setDraftName] = useState(activeUser.name);
+  const [profileMessage, setProfileMessage] = useState("");
+  const completionRate = Math.round((progress.completedDays.length / 30) * 100);
+  const quizAverage = progress.quizScores.length
+    ? Math.round(progress.quizScores.reduce((sum, score) => sum + score, 0) / progress.quizScores.length)
+    : 0;
+  const completedMentorStepCount = Object.values(progress.mentor.completedStepsByLesson)
+    .reduce((sum, steps) => sum + steps.length, 0);
+
+  useEffect(() => {
+    setDraftName(activeUser.name);
+  }, [activeUser.name]);
+
+  const saveProfileName = () => {
+    const nextName = draftName.trim();
+    if (!nextName) {
+      setProfileMessage("請保留一個顯示名稱 / Display name is required");
+      return;
+    }
+    updateProfileName(nextName);
+    setProfileMessage("已更新本機顯示名稱 / Local profile updated");
+  };
+
+  const resetProfile = () => {
+    if (window.confirm("這會清除本機學習者與學習進度，並回到首次設定流程。確定要繼續嗎？")) {
+      resetLocalProfile();
+    }
+  };
+
   return (
     <section className="stack">
-      <div className="admin-header">
-        <SectionHeader title="管理總覽 / Admin Dashboard" desc={`${activeTenant.name} 的租戶管理、會員進度與內容品質指標。`} />
-        <button className="secondary" onClick={onLogout}><LogOut size={16} /> 登出 / Logout</button>
+      <div className="local-records-header">
+        <SectionHeader title="本機紀錄 / Local Records" desc={`${activeUser.name} 的學習紀錄保存在此瀏覽器 localStorage；這不是後台系統，也沒有伺服器權限邏輯。`} />
       </div>
       <div className="metrics">
-        <Metric title="Tenant Members" value={`${tenantUsers.length}`} sub={activeTenant.name} icon={<Users />} />
-        <Metric title="Tenants" value={`${store.tenants.length}`} sub="Multi-tenant workspaces" icon={<Building2 />} />
-        <Metric title="Completion Rate" value="42.7%" sub="Tenant average" icon={<Trophy />} />
-        <Metric title="Quiz Pass Rate" value="68.9%" sub="Tenant average" icon={<ClipboardCheck />} />
+        <Metric title="Local Profiles" value={`${store.users.length}`} sub="localStorage profiles" icon={<Users />} />
+        <Metric title="Active Profile" value={activeUser.name} sub={activeUser.email ?? "localStorage profile"} icon={<UserRoundCog />} />
+        <Metric title="Completion Rate" value={`${completionRate}%`} sub={`${progress.completedDays.length}/30 days completed`} icon={<Trophy />} />
+        <Metric title="Quiz Average" value={`${quizAverage}%`} sub={`${progress.quizScores.length} quiz attempts`} icon={<ClipboardCheck />} />
       </div>
       <div className="grid two">
-        <Panel title="Tenant Management / 租戶管理">
+        <Panel title="LocalStorage Record / 學習紀錄">
           <table>
-            <thead><tr><th>Tenant</th><th>Plan</th><th>Domain</th><th>Members</th></tr></thead>
-            <tbody>{store.tenants.map((tenant) => (
-              <tr key={tenant.id}><td>{tenant.name}</td><td>{tenant.plan}</td><td>{tenant.domain}</td><td>{tenant.members}</td></tr>
-            ))}</tbody>
+            <thead><tr><th>Record</th><th>Value</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>Current Day</td><td>Day {progress.currentDay}</td><td>重新整理後會回到目前學習進度。</td></tr>
+              <tr><td>Completed Days</td><td>{progress.completedDays.length}</td><td>已按下完成的課程天數。</td></tr>
+              <tr><td>Quiz Attempts</td><td>{progress.quizScores.length}</td><td>測驗送出後保存的成績紀錄。</td></tr>
+              <tr><td>Mentor Steps</td><td>{completedMentorStepCount}</td><td>每日互動引導中已完成的步驟數。</td></tr>
+            </tbody>
           </table>
         </Panel>
-        <Panel title="Member Management / 會員管理">
-          <div className="search"><Search size={16} /><input placeholder="Search name or email" /></div>
-          <table>
-            <thead><tr><th>Name</th><th>Role</th><th>Tenant</th><th>Status</th></tr></thead>
-            <tbody>{[...tenantUsers, ...members.map((member, index) => ({ id: `seed-${index}`, name: member.name, email: member.email, role: "student" as Role, tenantId: activeTenant.id, password: "" }))].map((member) => (
-              <tr key={member.email}><td>{member.name}<small>{member.email}</small></td><td>{member.role}</td><td>{activeTenant.name}</td><td>Active</td></tr>
-            ))}</tbody>
-          </table>
+        <Panel title="Profile Settings / 本機學習者設定">
+          <div className="profile-settings">
+            <label>Display name / 顯示名稱<input value={draftName} onChange={(event) => setDraftName(event.target.value)} /></label>
+            <button className="primary" onClick={saveProfileName}>更新名稱 / Update Name</button>
+            {profileMessage && <div className="notice success">{profileMessage}</div>}
+            <div className="local-records-note">這不是登入帳號，只是此瀏覽器用來標記學習進度的本機 profile。</div>
+            <button className="secondary danger-action" onClick={resetProfile}>清除本機紀錄 / Reset Local Record</button>
+          </div>
         </Panel>
       </div>
     </section>
